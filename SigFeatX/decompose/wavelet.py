@@ -79,7 +79,7 @@ class WaveletDecomposer:
         coeffs, _ = pywt.cwt(signal, scales, self.wavelet)
         return coeffs
     
-    def swt(self, signal: np.ndarray, level: int = 1) -> List[Tuple[np.ndarray, np.ndarray]]:
+    def swt(self, signal: np.ndarray, level: int = 1) -> List[tuple[np.ndarray, np.ndarray]]:
         """
         Stationary Wavelet Transform.
         
