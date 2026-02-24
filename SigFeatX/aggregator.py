@@ -17,7 +17,7 @@ from .feature_consistency import validate_feature_dict, CrossMethodChecker
 
 
 # ---------------------------------------------------------------------------
-# Pipeline metadata container (Review #3)
+# Pipeline metadata container 
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -196,7 +196,7 @@ class FeatureAggregator:
         return all_features
 
     # ------------------------------------------------------------------
-    # Pluggable pipeline (Review #3)
+    # Pluggable pipeline 
     # ------------------------------------------------------------------
 
     def run_pipeline(
