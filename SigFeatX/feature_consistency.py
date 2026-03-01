@@ -22,49 +22,84 @@ class ContractViolation:
 
 # Each entry: (min, max, warn_only)
 # min/max of None means no bound in that direction.
-# warn_only=True  → issue a warning but don't mark as a hard violation
-# warn_only=False → hard violation (something is definitely wrong)
+# warn_only=True  -> issue a warning but don't mark as a hard violation
+# warn_only=False -> hard violation (something is definitely wrong)
+#
+# CHANGE LOG vs original:
+#
+# spectral_kurtosis  [NEW ENTRY]
+#   Spectral kurtosis = sum((f - centroid)^4 * P(f)) / spectral_spread^4
+#   This is the 4th standardised moment of the power spectrum.
+#   For a pure sine (near-Dirac spectrum) the value is mathematically
+#   unbounded — values of 100-1000+ are physically correct, not errors.
+#   Upper bound removed entirely. Lower bound 0.0 (negative = numerical error).
+#   warn_only=True because high values are expected on tonal signals.
+#
+# kurtosis (time domain)
+#   scipy.stats.kurtosis returns EXCESS kurtosis (Gaussian = 0).
+#   For highly impulsive signals such as ECG with sharp R-peaks, values
+#   well above 100 are physically correct (leptokurtic distribution).
+#   Upper bound raised from 100 to None. Lower bound stays -10 (excess
+#   kurtosis < -10 would imply a platykurtic distribution flatter than
+#   any real physical signal).
+
 _CONTRACTS: Dict[str, Tuple] = {
-    # time domain — your TimeDomainFeatures.extract()
-    "rms":                  (0.0,  None,  False),
-    "energy":               (0.0,  None,  False),
-    "power":                (0.0,  None,  False),
-    "variance":             (0.0,  None,  False),
-    "std":                  (0.0,  None,  False),
-    "mean_absolute":        (0.0,  None,  False),
-    "sum_absolute":         (0.0,  None,  False),
-    "zero_crossings":       (0.0,  None,  False),
-    "zero_crossing_rate":   (0.0,  1.0,   False),
-    "crest_factor":         (0.0,  None,  True),   # very high values possible but suspicious
-    "shape_factor":         (0.0,  None,  True),
-    "impulse_factor":       (0.0,  None,  True),
-    "iqr":                  (0.0,  None,  False),
-    "kurtosis":             (-10.0, 100.0, True),  # scipy kurtosis is excess (Gaussian=0)
+    # ── Time domain ─────────────────────────────────────────────────────────
+    "rms":                  (0.0,   None,  False),
+    "energy":               (0.0,   None,  False),
+    "power":                (0.0,   None,  False),
+    "variance":             (0.0,   None,  False),
+    "std":                  (0.0,   None,  False),
+    "mean_absolute":        (0.0,   None,  False),
+    "sum_absolute":         (0.0,   None,  False),
+    "zero_crossings":       (0.0,   None,  False),
+    "zero_crossing_rate":   (0.0,   1.0,   False),
+    "crest_factor":         (0.0,   None,  True),
+    "shape_factor":         (0.0,   None,  True),
+    "impulse_factor":       (0.0,   None,  True),
+    "iqr":                  (0.0,   None,  False),
+
+    # scipy excess kurtosis: Gaussian=0, impulsive signals can far exceed 100.
+    # Lower bound -10 catches impossible platykurtic distributions.
+    # Upper bound removed — no physical ceiling.
+    "kurtosis":             (-10.0, None,  True),
+
     "skewness":             (-20.0, 20.0,  True),
 
-    # frequency domain — your FrequencyDomainFeatures.extract()
-    "spectral_centroid":    (0.0,  None,  False),  # must be positive Hz
-    "spectral_spread":      (0.0,  None,  False),
-    "spectral_bandwidth":   (0.0,  None,  False),
-    "spectral_rolloff":     (0.0,  None,  False),
-    "dominant_frequency":   (0.0,  None,  False),
-    "max_magnitude":        (0.0,  None,  False),
-    "spectral_flatness":    (0.0,  1.0,   False),  # geometric/arithmetic mean ≤ 1 by AM-GM
-    # spectral_entropy is in bits (log2), not normalised — no fixed upper bound
-    "spectral_entropy":     (0.0,  None,  False),
+    # ── Frequency domain ─────────────────────────────────────────────────────
+    "spectral_centroid":    (0.0,   None,  False),
+    "spectral_spread":      (0.0,   None,  False),
+    "spectral_bandwidth":   (0.0,   None,  False),
+    "spectral_rolloff":     (0.0,   None,  False),
+    "dominant_frequency":   (0.0,   None,  False),
+    "max_magnitude":        (0.0,   None,  False),
 
-    # entropy — your EntropyFeatures.extract()
-    "sample_entropy":       (0.0,  None,  False),
-    "approximate_entropy":  (None, None,  True),   # can be negative with this estimator
-    "permutation_entropy":  (0.0,  None,  False),
-    "shannon_entropy":      (0.0,  None,  False),
+    # spectral_flatness = geometric_mean(P) / arithmetic_mean(P).
+    # AM-GM inequality guarantees the ratio is in [0, 1].
+    # This IS a hard mathematical bound — keep warn_only=False.
+    "spectral_flatness":    (0.0,   1.0,   False),
 
-    # nonlinear — your NonlinearFeatures.extract()
-    "hjorth_activity":      (0.0,  None,  False),
-    "hjorth_mobility":      (0.0,  None,  False),
-    "hjorth_complexity":    (0.0,  None,  True),
-    "hurst_exponent":       (0.0,  2.0,   True),
-    "dfa_alpha":            (0.0,  3.0,   True),
+    # spectral_entropy in bits (log2). No fixed upper bound.
+    "spectral_entropy":     (0.0,   None,  False),
+
+    # 4th standardised moment of the power spectrum.
+    # Unbounded above: pure tones produce values of 100-1000+.
+    # Lower bound 0.0: a negative value is a numerical error.
+    # warn_only=True: high values on tonal signals are expected and correct.
+    "spectral_kurtosis":    (0.0,   None,  True),
+
+    # ── Entropy ──────────────────────────────────────────────────────────────
+    "sample_entropy":       (0.0,   None,  False),
+    "approximate_entropy":  (None,  None,  True),   # can be negative with this estimator
+    "permutation_entropy":  (0.0,   None,  False),
+    "shannon_entropy":      (0.0,   None,  False),
+
+    # ── Nonlinear ────────────────────────────────────────────────────────────
+    "hjorth_activity":      (0.0,   None,  False),
+    "hjorth_mobility":      (0.0,   None,  False),
+    "hjorth_complexity":    (0.0,   None,  True),
+    "hurst_exponent":       (0.0,   2.0,   True),
+    "dfa_alpha":            (0.0,   3.0,   True),
 }
 
 
@@ -100,7 +135,7 @@ def validate_feature_dict(
         if lo is not None and value < lo:
             v = ContractViolation(
                 feature=name, method=method, value=value,
-                reason=f"Expected ≥ {lo}. Possible NaN propagation or implementation bug."
+                reason=f"Expected >= {lo}. Possible NaN propagation or implementation bug."
             )
             violations.append(v)
             if not warn_only:
@@ -111,7 +146,7 @@ def validate_feature_dict(
         if hi is not None and value > hi:
             v = ContractViolation(
                 feature=name, method=method, value=value,
-                reason=f"Expected ≤ {hi}. Check for division-by-zero or overflow."
+                reason=f"Expected <= {hi}. Check for division-by-zero or overflow."
             )
             violations.append(v)
             if not warn_only:
@@ -129,17 +164,17 @@ def validate_feature_dict(
 @dataclass
 class MethodComparison:
     feature: str
-    values: Dict[str, float]      # method -> value
-    relative_spread: float        # std(values) / |mean(values)|  — 0 = identical
+    values: Dict[str, float]
+    relative_spread: float
     consistent: bool
     note: str
 
     def __str__(self):
         vals = "  ".join(f"{m}={v:.4g}" for m, v in self.values.items())
-        status = "✓" if self.consistent else "✗"
+        status = "OK" if self.consistent else "WARN"
         return (
-            f"{status} {self.feature:<35s} spread={self.relative_spread:.3f}  |  "
-            f"{vals}\n    {self.note}"
+            f"[{status}] {self.feature:<35s} spread={self.relative_spread:.3f}  |  "
+            f"{vals}\n       {self.note}"
         )
 
 
@@ -165,7 +200,6 @@ class CrossMethodChecker:
                     as inconsistent. Default 0.3 = 30% spread.
         """
         self.tolerance = tolerance
-        # method_tag -> {bare_feature_name: value}
         self._registry: Dict[str, Dict[str, float]] = {}
 
     def add_from_aggregator_output(
@@ -182,14 +216,11 @@ class CrossMethodChecker:
         method_tag   : label, e.g. "EMD", "VMD"
         all_features : the full dict returned by extract_all_features()
         prefix       : the decomposition prefix used, e.g. "emd", "vmd"
-                       Used to pull out only the relevant features.
         """
-        # Your _add_prefix() uses f"{prefix}_{k}", e.g. "emd_comp_0_rms"
-        # We strip the top-level method prefix so we can align across methods
         subset = {}
         for k, v in all_features.items():
             if k.startswith(f"{prefix}_"):
-                bare = k[len(prefix) + 1:]    # "comp_0_rms", etc.
+                bare = k[len(prefix) + 1:]
                 subset[bare] = v
         self._registry[method_tag] = subset
 
@@ -218,9 +249,7 @@ class CrossMethodChecker:
 
         methods = list(self._registry.keys())
 
-        # Determine features to compare
         if features is None:
-            # Intersection of keys across all methods
             key_sets = [set(v.keys()) for v in self._registry.values()]
             features = list(key_sets[0].intersection(*key_sets[1:]))
 
@@ -228,12 +257,10 @@ class CrossMethodChecker:
         for feat in sorted(features):
             vals = {}
             for m in methods:
-                # Support both exact match and suffix match (e.g. "rms" matches "comp_0_rms")
                 exact = self._registry[m].get(feat)
                 if exact is not None:
                     vals[m] = exact
                 else:
-                    # Find first key that ends with the feature name
                     for k, v in self._registry[m].items():
                         if k == feat or k.endswith(f"_{feat}"):
                             vals[m] = v
@@ -251,9 +278,10 @@ class CrossMethodChecker:
                 note = f"Methods agree within {spread*100:.1f}%."
             else:
                 note = (
-                    f"Methods diverge by {spread*100:.1f}% (threshold {self.tolerance*100:.0f}%). "
-                    "Check that all methods process the same signal length and that "
-                    "component energy is comparable before feature extraction."
+                    f"Methods diverge by {spread*100:.1f}% "
+                    f"(threshold {self.tolerance*100:.0f}%). "
+                    "Check that all methods process the same signal length and "
+                    "that component energy is comparable before feature extraction."
                 )
 
             results.append(MethodComparison(
