@@ -2,7 +2,7 @@ import numpy as np
 import sys
 sys.path.insert(0, '..')
 
-from SigFeatX import FeatureAggregator, SignalPreprocessor
+from SigFeatX.aggregator import FeatureAggregator, SignalPreprocessor
 from SigFeatX.decompose import WaveletDecomposer, EMD, VMD
 from SigFeatX.features.features import DecompositionFeatures
 
