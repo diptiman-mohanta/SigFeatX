@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import stats, signal
 from scipy.fft import fft, fftfreq
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from SigFeatX.utils import SignalUtils
 
@@ -89,12 +89,12 @@ class FrequencyDomainFeatures:
     def extract(sig: np.ndarray, fs: float = 1.0) -> Dict[str, float]:
         features = {}
         n        = len(sig)
-        fft_vals = fft(sig)
-        freqs    = fftfreq(n, 1/fs)
+        fft_vals = np.asarray(fft(sig), dtype=np.complex128)
+        freqs    = np.asarray(fftfreq(n, 1/fs), dtype=np.float64)
 
-        pos_mask    = freqs >= 0
-        freqs       = freqs[pos_mask]
-        fft_vals    = fft_vals[pos_mask]
+        pos_idx     = np.where(freqs >= 0)[0]
+        freqs       = freqs[pos_idx]
+        fft_vals    = fft_vals[pos_idx]
         magnitude   = np.abs(fft_vals)
         power       = magnitude ** 2
         power_norm  = power / (np.sum(power) + 1e-10)
@@ -273,7 +273,7 @@ class EntropyFeatures:
         return float(-np.sum(prob * np.log2(prob)))
 
     @staticmethod
-    def _sample_entropy(sig: np.ndarray, m: int = 2, r: float = None) -> float:
+    def _sample_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
         """
         Sample Entropy (Richman & Moorman 2000).
 
@@ -282,7 +282,7 @@ class EntropyFeatures:
         Self-matches excluded (i≠j) per the paper.
         """
         if r is None:
-            r = 0.2 * np.std(sig)
+            r = float(0.2 * np.std(sig))
 
         N = len(sig)
 
@@ -336,7 +336,7 @@ class EntropyFeatures:
         return float(max(0.0, -np.sum(probs * np.log2(probs + 1e-10))))
 
     @staticmethod
-    def _approximate_entropy(sig: np.ndarray, m: int = 2, r: float = None) -> float:
+    def _approximate_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
         """
         Approximate Entropy — vectorised block-wise implementation.
 
@@ -346,7 +346,7 @@ class EntropyFeatures:
         than the loop version for N=2000.
         """
         if r is None:
-            r = 0.2 * np.std(sig)
+            r = float(0.2 * np.std(sig))
         N = len(sig)
 
         def _phi(template_len: int) -> float:
@@ -388,8 +388,11 @@ class NonlinearFeatures:
         mobility   = np.sqrt(np.var(diff1) / (activity + 1e-10))
         diff2      = np.diff(diff1)
         complexity = np.sqrt(np.var(diff2) / (np.var(diff1) + 1e-10)) / (mobility + 1e-10)
-        return {'hjorth_activity': activity, 'hjorth_mobility': mobility,
-                'hjorth_complexity': complexity}
+        return {
+            'hjorth_activity': float(activity),
+            'hjorth_mobility': float(mobility),
+            'hjorth_complexity': float(complexity),
+        }
 
     @staticmethod
     def _higuchi_fractal_dimension(sig: np.ndarray, kmax: int = 10) -> float:
