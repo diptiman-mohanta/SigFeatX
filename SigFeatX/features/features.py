@@ -3,6 +3,8 @@ from scipy import stats, signal
 from scipy.fft import fft, fftfreq
 from typing import Dict, List, Tuple
 
+from SigFeatX.utils import SignalUtils
+
 
 class TimeDomainFeatures:
     """Extract time domain statistical features."""
@@ -28,6 +30,16 @@ class TimeDomainFeatures:
         features['sum_absolute']     = np.sum(np.abs(sig))
         features['zero_crossings']   = np.sum(np.diff(np.sign(sig)) != 0)
         features['zero_crossing_rate'] = features['zero_crossings'] / len(sig)
+        features['line_length']      = np.sum(np.abs(np.diff(sig)))
+
+        acf_peak_lag, acf_peak_value = TimeDomainFeatures._autocorrelation_peak(sig)
+        features['autocorrelation_peak_lag'] = acf_peak_lag
+        features['autocorrelation_peak_value'] = acf_peak_value
+
+        tkeo = TimeDomainFeatures._tkeo(sig)
+        features['tkeo_mean']        = np.mean(tkeo)
+        features['tkeo_std']         = np.std(tkeo)
+        features['tkeo_max']         = np.max(tkeo)
 
         rms_val  = features['rms']
         mean_abs = features['mean_absolute']
@@ -43,6 +55,31 @@ class TimeDomainFeatures:
         features['coeff_variation'] = features['std'] / (np.abs(features['mean']) + 1e-10)
 
         return features
+
+    @staticmethod
+    def _tkeo(sig: np.ndarray) -> np.ndarray:
+        if len(sig) < 3:
+            return np.zeros(1, dtype=float)
+        return sig[1:-1] ** 2 - sig[:-2] * sig[2:]
+
+    @staticmethod
+    def _autocorrelation_peak(sig: np.ndarray) -> Tuple[float, float]:
+        if len(sig) < 3:
+            return 0.0, 0.0
+
+        centered = sig - np.mean(sig)
+        denom = np.sum(centered ** 2)
+        if denom <= 1e-12:
+            return 0.0, 0.0
+
+        acf_full = np.correlate(centered, centered, mode='full')
+        acf = acf_full[len(sig) - 1 :] / (denom + 1e-10)
+        if len(acf) <= 1:
+            return 0.0, 0.0
+
+        peak_lag = int(np.argmax(acf[1:]) + 1)
+        peak_value = float(acf[peak_lag])
+        return float(peak_lag), peak_value
 
 
 class FrequencyDomainFeatures:
@@ -66,6 +103,9 @@ class FrequencyDomainFeatures:
         features['spectral_spread']    = np.sqrt(
             np.sum(((freqs - features['spectral_centroid'])**2) * power_norm))
         features['spectral_bandwidth'] = features['spectral_spread']
+        features['spectral_bandwidth_90'] = FrequencyDomainFeatures._fractional_power_bandwidth(
+            freqs, power_norm, lower_fraction=0.05, upper_fraction=0.95
+        )
 
         cumsum_power = np.cumsum(power_norm)
         rolloff_idx  = np.where(cumsum_power >= 0.95)[0]
@@ -77,6 +117,11 @@ class FrequencyDomainFeatures:
         arithmetic_mean= np.mean(magnitude)
         features['spectral_flatness']  = geometric_mean / (arithmetic_mean + 1e-10)
         features['spectral_entropy']   = -np.sum(power_norm * np.log2(power_norm + 1e-10))
+        features['spectral_slope']     = FrequencyDomainFeatures._spectral_slope(freqs, power)
+
+        inst_freq_mean, inst_freq_std = FrequencyDomainFeatures._instantaneous_frequency_stats(sig, fs)
+        features['instantaneous_freq_mean'] = inst_freq_mean
+        features['instantaneous_freq_std']  = inst_freq_std
 
         sc  = features['spectral_centroid']
         ss  = features['spectral_spread']
@@ -98,8 +143,110 @@ class FrequencyDomainFeatures:
             features[f'energy_{band_name}']       = band_energy
             features[f'energy_ratio_{band_name}'] = band_energy / (total_energy + 1e-10)
 
+        eeg_bandpowers = FrequencyDomainFeatures._eeg_bandpowers(freqs, power, fs)
+        features.update(eeg_bandpowers)
+
         features['spectral_flux'] = np.sum(np.diff(magnitude)**2) if len(magnitude) > 1 else 0.0
         return features
+
+    @staticmethod
+    def _instantaneous_frequency_stats(
+        sig: np.ndarray,
+        fs: float,
+        edge_fraction: float = 0.02,
+        amplitude_threshold_ratio: float = 0.05,
+    ) -> Tuple[float, float]:
+        if len(sig) < 4 or not np.all(np.isfinite(sig)) or np.allclose(sig, sig[0]):
+            return 0.0, 0.0
+
+        inst_freq = SignalUtils.compute_instantaneous_frequency(sig, fs=fs)
+        envelope = SignalUtils.compute_envelope(sig)
+        if len(inst_freq) == 0 or len(envelope) < 2:
+            return 0.0, 0.0
+
+        midpoint_envelope = 0.5 * (envelope[:-1] + envelope[1:])
+        valid = np.isfinite(inst_freq) & np.isfinite(midpoint_envelope)
+        if not np.any(valid):
+            return 0.0, 0.0
+
+        max_envelope = np.max(midpoint_envelope[valid])
+        if max_envelope <= 1e-12:
+            return 0.0, 0.0
+
+        valid &= midpoint_envelope >= amplitude_threshold_ratio * max_envelope
+
+        trim = int(np.floor(edge_fraction * len(inst_freq)))
+        if trim > 0:
+            valid[:trim] = False
+            valid[-trim:] = False
+
+        nyquist = fs / 2.0
+        valid &= (inst_freq >= 0.0) & (inst_freq <= nyquist + 1e-10)
+
+        inst_freq = inst_freq[valid]
+        if len(inst_freq) == 0:
+            return 0.0, 0.0
+
+        return float(np.mean(inst_freq)), float(np.std(inst_freq))
+
+    @staticmethod
+    def _spectral_slope(freqs: np.ndarray, power: np.ndarray) -> float:
+        mask = (freqs > 0.0) & np.isfinite(freqs) & np.isfinite(power) & (power > 1e-20)
+        if np.sum(mask) < 2:
+            return 0.0
+
+        x = np.log10(freqs[mask])
+        y = np.log10(power[mask])
+        slope, _ = np.polyfit(x, y, deg=1)
+        return float(slope)
+
+    @staticmethod
+    def _eeg_bandpowers(freqs: np.ndarray, power: np.ndarray, fs: float) -> Dict[str, float]:
+        nyquist = fs / 2.0
+        bands = {
+            'delta': (0.5, 4.0),
+            'theta': (4.0, 8.0),
+            'alpha': (8.0, 13.0),
+            'beta':  (13.0, 30.0),
+            'gamma': (30.0, 100.0),
+        }
+
+        total_pos_power = np.sum(power)
+        out: Dict[str, float] = {}
+        for name, (low, high) in bands.items():
+            lo = max(0.0, low)
+            hi = min(nyquist, high)
+            if hi <= lo:
+                band_power = 0.0
+            else:
+                mask = (freqs >= lo) & (freqs < hi)
+                band_power = float(np.sum(power[mask]))
+
+            out[f'bandpower_{name}'] = band_power
+            out[f'bandpower_{name}_rel'] = float(band_power / (total_pos_power + 1e-10))
+
+        return out
+
+    @staticmethod
+    def _fractional_power_bandwidth(
+        freqs: np.ndarray,
+        power_norm: np.ndarray,
+        lower_fraction: float,
+        upper_fraction: float,
+    ) -> float:
+        if len(freqs) == 0 or len(power_norm) == 0:
+            return 0.0
+
+        cumsum_power = np.cumsum(power_norm)
+        if cumsum_power[-1] <= 1e-12:
+            return 0.0
+
+        low_idx = int(np.searchsorted(cumsum_power, lower_fraction, side='left'))
+        high_idx = int(np.searchsorted(cumsum_power, upper_fraction, side='left'))
+        low_idx = min(max(low_idx, 0), len(freqs) - 1)
+        high_idx = min(max(high_idx, 0), len(freqs) - 1)
+
+        return float(max(0.0, freqs[high_idx] - freqs[low_idx]))
 
 
 class EntropyFeatures:
