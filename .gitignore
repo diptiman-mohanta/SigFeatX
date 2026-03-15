@@ -66,6 +66,17 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+
+# uv
+# uv.lock is intentionally committed — remove this line if you want to ignore it
+# uv.lock
+
+# Generated test figures — regenerated on every test run
+tests/figures/
+
 # Project specific
 *.npy
 *.csv

@@ -33,6 +33,7 @@ import sys
 import warnings
 import traceback
 import numpy as np
+import pytest
 import matplotlib
 matplotlib.use("Agg")          # no display needed
 import matplotlib.pyplot as plt
@@ -124,6 +125,24 @@ SIGNALS = {
     "ECG"       : make_ecg(),
 }
 
+
+@pytest.fixture(scope="module", params=list(SIGNALS.keys()), ids=list(SIGNALS.keys()))
+def suite(request):
+    """Parametrized signal suite name for pytest execution."""
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def sig(suite: str) -> np.ndarray:
+    """Signal corresponding to the active pytest suite."""
+    return SIGNALS[suite]
+
+
+@pytest.fixture(scope="module")
+def decomp_results(suite: str, sig: np.ndarray):
+    """Cached decomposition outputs for quality/consistency tests."""
+    return _run_decomposition_checks(suite, sig)
+
 # ============================================================================
 # 1.  TEST HELPERS
 # ============================================================================
@@ -149,7 +168,7 @@ def section(title: str):
 # 2.  INDIVIDUAL TESTS
 # ============================================================================
 
-def test_preprocessing(suite: str, sig: np.ndarray):
+def _run_preprocessing_checks(suite: str, sig: np.ndarray):
     section(f"[{suite}] Preprocessing")
     pp = SignalPreprocessor()
 
@@ -176,7 +195,11 @@ def test_preprocessing(suite: str, sig: np.ndarray):
     return detrended, denoised, normalised
 
 
-def test_decomposition(suite: str, sig: np.ndarray):
+def test_preprocessing(suite: str, sig: np.ndarray):
+    _run_preprocessing_checks(suite, sig)
+
+
+def _run_decomposition_checks(suite: str, sig: np.ndarray):
     section(f"[{suite}] Decomposition")
     results = {}
 
@@ -251,7 +274,11 @@ def test_decomposition(suite: str, sig: np.ndarray):
     return results
 
 
-def test_features(suite: str, sig: np.ndarray):
+def test_decomposition(suite: str, sig: np.ndarray):
+    _run_decomposition_checks(suite, sig)
+
+
+def _run_feature_checks(suite: str, sig: np.ndarray):
     section(f"[{suite}] Feature Extraction")
 
     # Detrend before frequency-domain tests so a linear trend doesn't push
@@ -305,7 +332,11 @@ def test_features(suite: str, sig: np.ndarray):
     return td, fd, en, nl
 
 
-def test_quality(suite: str, sig: np.ndarray, decomp_results: dict):
+def test_features(suite: str, sig: np.ndarray):
+    _run_feature_checks(suite, sig)
+
+
+def _run_quality_checks(suite: str, sig: np.ndarray, decomp_results: dict):
     section(f"[{suite}] Decomposition Quality")
     quality = {}
 
@@ -345,7 +376,11 @@ def test_quality(suite: str, sig: np.ndarray, decomp_results: dict):
     return quality
 
 
-def test_consistency(suite: str, decomp_results: dict):
+def test_quality(suite: str, sig: np.ndarray, decomp_results: dict):
+    _run_quality_checks(suite, sig, decomp_results)
+
+
+def _run_consistency_checks(suite: str, decomp_results: dict):
     section(f"[{suite}] Cross-Method Consistency (EMD vs VMD)")
 
     emd_feats = DecompositionFeatures.extract_from_components(
@@ -370,7 +405,11 @@ def test_consistency(suite: str, decomp_results: dict):
     return comparisons
 
 
-def test_pipeline(suite: str, sig: np.ndarray):
+def test_consistency(suite: str, decomp_results: dict):
+    _run_consistency_checks(suite, decomp_results)
+
+
+def _run_pipeline_checks(suite: str, sig: np.ndarray):
     section(f"[{suite}] Pipeline Metadata")
 
     agg = FeatureAggregator(fs=FS)
@@ -401,6 +440,10 @@ def test_pipeline(suite: str, sig: np.ndarray):
 
     print(meta)
     return features, meta
+
+
+def test_pipeline(suite: str, sig: np.ndarray):
+    _run_pipeline_checks(suite, sig)
 
 
 # ============================================================================
@@ -646,7 +689,7 @@ def run_all():
         print(f"{'█'*60}")
 
         try:
-            detrended, denoised, normalised = test_preprocessing(name, sig)
+            detrended, denoised, normalised = _run_preprocessing_checks(name, sig)
             preprocessed[name] = {
                 "detrended" : detrended,
                 "denoised"  : denoised,
@@ -660,7 +703,7 @@ def run_all():
             }
 
         try:
-            decomp = test_decomposition(name, sig)
+            decomp = _run_decomposition_checks(name, sig)
             all_decomp[name] = decomp
         except Exception as e:
             print(f"{FAIL}  [{name}] decomposition crashed: {e}")
@@ -669,13 +712,13 @@ def run_all():
             continue
 
         try:
-            test_features(name, sig)
+            _run_feature_checks(name, sig)
         except Exception as e:
             print(f"{FAIL}  [{name}] features crashed: {e}")
             traceback.print_exc()
 
         try:
-            quality = test_quality(name, sig, decomp)
+            quality = _run_quality_checks(name, sig, decomp)
             all_quality[name] = quality
         except Exception as e:
             print(f"{FAIL}  [{name}] quality check crashed: {e}")
@@ -683,13 +726,13 @@ def run_all():
             all_quality[name] = {}
 
         try:
-            test_consistency(name, decomp)
+            _run_consistency_checks(name, decomp)
         except Exception as e:
             print(f"{FAIL}  [{name}] consistency check crashed: {e}")
             traceback.print_exc()
 
         try:
-            test_pipeline(name, sig)
+            _run_pipeline_checks(name, sig)
         except Exception as e:
             print(f"{FAIL}  [{name}] pipeline crashed: {e}")
             traceback.print_exc()
