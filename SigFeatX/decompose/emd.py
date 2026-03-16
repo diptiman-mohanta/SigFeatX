@@ -14,6 +14,8 @@ from scipy import signal
 from scipy.interpolate import CubicSpline
 from typing import List, Optional
 
+from SigFeatX._validation import validate_signal_1d
+
 
 class EMD:
     """Empirical Mode Decomposition (Huang et al. 1998)."""
@@ -29,6 +31,12 @@ class EMD:
                        Recommended range 0.2–0.3. Original code used 1e-6
                        which caused severe over-sifting.
         """
+        if max_imf < 1:
+            raise ValueError(f"max_imf must be >= 1; got {max_imf}.")
+        if max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
+        if sd_threshold <= 0:
+            raise ValueError(f"sd_threshold must be > 0; got {sd_threshold}.")
         self.max_imf = max_imf
         self.max_iter = max_iter
         self.sd_threshold = sd_threshold
@@ -42,6 +50,7 @@ class EMD:
         List of IMFs in order from highest to lowest frequency,
         followed by the monotonic residual.
         """
+        sig = validate_signal_1d(sig, name='sig')
         imfs = []
         residual = sig.copy().astype(float)
 

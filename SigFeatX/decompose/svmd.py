@@ -10,6 +10,7 @@ Bugs fixed vs original:
 
 import numpy as np
 from .vmd import VMD
+from SigFeatX._validation import validate_signal_1d
 
 
 class SVMD:
@@ -30,6 +31,14 @@ class SVMD:
 
     def __init__(self, alpha: float = 2000, K_max: int = 10,
                  tol: float = 0.01, max_iter: int = 500):
+        if alpha <= 0:
+            raise ValueError(f"alpha must be > 0; got {alpha}.")
+        if K_max < 1:
+            raise ValueError(f"K_max must be >= 1; got {K_max}.")
+        if tol < 0:
+            raise ValueError(f"tol must be >= 0; got {tol}.")
+        if max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
         self.alpha    = alpha
         self.K_max    = K_max
         self.tol      = tol
@@ -43,9 +52,13 @@ class SVMD:
         -------
         np.ndarray of shape (n_modes, N)
         """
+        sig = validate_signal_1d(sig, name='sig')
         modes    = []
         residual = sig.copy().astype(float)
         orig_energy = np.sum(sig ** 2)
+
+        if orig_energy <= 1e-12:
+            return residual.reshape(1, -1)
 
         for _ in range(self.K_max):
             vmd  = VMD(alpha=self.alpha, K=1, tol=1e-7, max_iter=self.max_iter)

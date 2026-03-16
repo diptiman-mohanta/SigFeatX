@@ -4,6 +4,8 @@ import numpy as np
 from scipy.fft import fft, fftfreq, ifft
 from typing import Tuple
 
+from SigFeatX._validation import validate_sampling_rate, validate_signal_1d
+
 
 class FourierTransform:
     """Fourier Transform decomposition."""
@@ -15,7 +17,7 @@ class FourierTransform:
         Args:
             fs: Sampling frequency
         """
-        self.fs = fs
+        self.fs = validate_sampling_rate(fs)
         self.freqs = None
         self.fft_vals = None
     
@@ -29,6 +31,7 @@ class FourierTransform:
         Returns:
             Tuple of (frequencies, magnitude spectrum)
         """
+        signal = validate_signal_1d(signal, name='signal')
         n = len(signal)
         self.fft_vals = fft(signal)
         self.freqs = fftfreq(n, 1/self.fs)

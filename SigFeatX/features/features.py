@@ -3,6 +3,7 @@ from scipy import stats, signal
 from scipy.fft import fft, fftfreq
 from typing import Dict, List, Optional, Tuple
 
+from SigFeatX._validation import validate_sampling_rate, validate_signal_1d
 from SigFeatX.utils import SignalUtils
 
 
@@ -11,6 +12,7 @@ class TimeDomainFeatures:
 
     @staticmethod
     def extract(sig: np.ndarray) -> Dict[str, float]:
+        sig = validate_signal_1d(sig, name='sig')
         features = {}
         features['mean']             = np.mean(sig)
         features['std']              = np.std(sig)
@@ -21,8 +23,12 @@ class TimeDomainFeatures:
         features['min']              = np.min(sig)
         features['range']            = np.ptp(sig)
         features['peak_to_peak']     = features['range']
-        features['skewness']         = stats.skew(sig)
-        features['kurtosis']         = stats.kurtosis(sig)
+        if len(sig) < 3 or np.allclose(sig, sig[0]):
+            features['skewness'] = 0.0
+            features['kurtosis'] = 0.0
+        else:
+            features['skewness'] = float(stats.skew(sig))
+            features['kurtosis'] = float(stats.kurtosis(sig))
         features['rms']              = np.sqrt(np.mean(sig**2))
         features['energy']           = np.sum(sig**2)
         features['power']            = features['energy'] / len(sig)
@@ -87,6 +93,8 @@ class FrequencyDomainFeatures:
 
     @staticmethod
     def extract(sig: np.ndarray, fs: float = 1.0) -> Dict[str, float]:
+        sig = validate_signal_1d(sig, name='sig')
+        fs = validate_sampling_rate(fs)
         features = {}
         n        = len(sig)
         fft_vals = np.asarray(fft(sig), dtype=np.complex128)
@@ -116,7 +124,8 @@ class FrequencyDomainFeatures:
         geometric_mean = np.exp(np.mean(np.log(magnitude + 1e-10)))
         arithmetic_mean= np.mean(magnitude)
         features['spectral_flatness']  = geometric_mean / (arithmetic_mean + 1e-10)
-        features['spectral_entropy']   = -np.sum(power_norm * np.log2(power_norm + 1e-10))
+        features['spectral_entropy']   = max(
+            0.0, float(-np.sum(power_norm * np.log2(power_norm + 1e-10))))
         features['spectral_slope']     = FrequencyDomainFeatures._spectral_slope(freqs, power)
 
         inst_freq_mean, inst_freq_std = FrequencyDomainFeatures._instantaneous_frequency_stats(sig, fs)
@@ -254,6 +263,7 @@ class EntropyFeatures:
 
     @staticmethod
     def extract(sig: np.ndarray) -> Dict[str, float]:
+        sig = validate_signal_1d(sig, name='sig')
         return {
             'shannon_entropy'     : EntropyFeatures._shannon_entropy(sig),
             'sample_entropy'      : EntropyFeatures._sample_entropy(sig),
@@ -285,6 +295,8 @@ class EntropyFeatures:
             r = float(0.2 * np.std(sig))
 
         N = len(sig)
+        if N <= m + 1:
+            return 0.0
 
         def _count_matches(template_len: int) -> int:
             # Build template matrix: shape (N - template_len, template_len)
@@ -324,6 +336,8 @@ class EntropyFeatures:
     def _permutation_entropy(sig: np.ndarray, order: int = 3, delay: int = 1) -> float:
         """Permutation Entropy — unchanged, correct."""
         n           = len(sig)
+        if n < delay * (order - 1) + 1:
+            return 0.0
         permutations= {}
         for i in range(n - delay * (order - 1)):
             pattern = sig[i : i + delay * order : delay]
@@ -348,6 +362,8 @@ class EntropyFeatures:
         if r is None:
             r = float(0.2 * np.std(sig))
         N = len(sig)
+        if N <= m + 1:
+            return 0.0
 
         def _phi(template_len: int) -> float:
             M        = N - template_len + 1
@@ -371,6 +387,7 @@ class NonlinearFeatures:
 
     @staticmethod
     def extract(sig: np.ndarray) -> Dict[str, float]:
+        sig = validate_signal_1d(sig, name='sig')
         features = {}
         features.update(NonlinearFeatures._hjorth_parameters(sig))
         features['higuchi_fractal_dimension']  = NonlinearFeatures._higuchi_fractal_dimension(sig)
@@ -436,6 +453,8 @@ class NonlinearFeatures:
     def _petrosian_fractal_dimension(sig: np.ndarray) -> float:
         """Petrosian FD — unchanged, correct."""
         n       = len(sig)
+        if n < 2:
+            return 1.0
         diff    = np.diff(sig)
         n_delta = np.sum(diff[:-1] * diff[1:] < 0)
         return float(np.log10(n) / (np.log10(n) + np.log10(n / (n + 0.4 * n_delta))))

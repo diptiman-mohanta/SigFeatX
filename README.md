@@ -3,10 +3,15 @@ A comprehensive Python library for extracting statistical features from 1D signa
 ## Features
 
 ### Signal Preprocessing
-- **Denoising**: Wavelet, median filter, lowpass filter
+- **Denoising**: Wavelet, median filter, lowpass, bandpass, notch
 - **Normalization**: Z-score, min-max, robust (MAD-based)
-- **Detrending**: Linear and constant detrending
+- **Detrending**: Linear, constant, and ALS baseline detrending
 - **Resampling**: Linear and Fourier-based resampling
+
+### Workflow Utilities
+- **Batch Extraction**: Feature tables for multiple signals with optional parallelism
+- **Sliding-Window Extraction**: Per-window features with sample/time metadata
+- **Multi-Channel Extraction**: Channel-prefixed features plus coherence, PLV, and cross-correlation
 
 ### Decomposition Methods
 - **Fourier Transform (FT)**: Classical frequency domain decomposition
@@ -181,18 +186,45 @@ nonlinear_features = NonlinearFeatures.extract(signal)
 ### Batch Processing
 
 ```python
-import pandas as pd
+signals = [signal1, signal2, signal3]
 
-signals = [signal1, signal2, signal3, ...]
-all_features = []
+result = extractor.extract_batch(
+    signals,
+    decomposition_methods=['fourier', 'dwt'],
+    preprocess_signal=False,
+    n_jobs=2,
+)
 
-for sig in signals:
-    features = extractor.extract_all_features(sig)
-    all_features.append(features)
-
-# Convert to DataFrame
-df = pd.DataFrame(all_features)
+df = result.dataframe
 df.to_csv('features.csv', index=False)
+```
+
+### Sliding-Window Processing
+
+```python
+windowed = extractor.extract_windowed(
+    signal,
+    window_size=256,
+    step_size=128,
+    decomposition_methods=['fourier'],
+    preprocess_signal=False,
+)
+
+# Includes window_idx, start_sample, end_sample, start_time_s, end_time_s
+window_df = windowed.dataframe
+```
+
+### Multi-Channel Processing
+
+```python
+multichannel = np.vstack([signal_ch1, signal_ch2, signal_ch3])
+
+features = extractor.extract_multichannel(
+    multichannel,
+    channel_names=['Fz', 'Cz', 'Pz'],
+    decomposition_methods=['fourier'],
+    include_cross=True,
+)
 ```
 
 ### Using Utility Functions
@@ -245,12 +277,28 @@ Extract all features from signal.
   - `denoise`: Apply denoising (default: True)
   - `normalize`: Apply normalization (default: True)
   - `detrend`: Apply detrending (default: True)
-  - `denoise_method`: Denoising method ('wavelet', 'median', 'lowpass')
+  - `denoise_method`: Denoising method ('wavelet', 'median', 'lowpass', 'bandpass', 'notch')
   - `normalize_method`: Normalization method ('zscore', 'minmax', 'robust')
-  - `detrend_method`: Detrending method ('linear', 'constant')
+  - `detrend_method`: Detrending method ('linear', 'constant', 'als')
+  - `detrend_params`: Extra ALS parameters such as `lam`, `p`, and `n_iter`
 
 **Returns:**
 - Dictionary of feature names and values
+
+#### `extract_batch(signals, ..., n_jobs=1, on_error='warn')`
+
+Extract features for a list or 2D array of signals and return a `BatchResult`
+containing a pandas DataFrame plus success/error metadata.
+
+#### `extract_windowed(signal, window_size, step_size, ...)`
+
+Run the normal extraction pipeline over sliding windows and return a
+`BatchResult` with per-window metadata columns.
+
+#### `extract_multichannel(signals_2d, channel_names=None, include_cross=True, ...)`
+
+Extract per-channel features from a `(n_channels, n_samples)` array and,
+optionally, pairwise coherence, cross-correlation, and PLV summaries.
 
 ### SignalPreprocessor
 
@@ -270,9 +318,10 @@ Denoise signal using various methods.
 
 Normalize signal.
 
-#### `detrend(sig, method='linear')`
+#### `detrend(sig, method='linear', **kwargs)`
 
-Remove trend from signal.
+Remove trend from signal. For `method='als'`, pass `lam`, `p`, and `n_iter`
+through `**kwargs`.
 
 #### `resample(sig, target_length, method='linear')`
 
@@ -295,6 +344,7 @@ WaveletDecomposer(wavelet='db4')
 - `dwt(signal, level=None)`: Discrete Wavelet Transform
 - `wpd(signal, level=3)`: Wavelet Packet Decomposition
 - `cwt(signal, scales=None)`: Continuous Wavelet Transform
+  - If the configured wavelet is discrete-only (for example `db4`), CWT falls back to `morl`
 - `swt(signal, level=1)`: Stationary Wavelet Transform
 
 #### EMD
@@ -364,10 +414,10 @@ SignalIO()
 ```
 
 **Methods:**
-- `load_signal(filepath, file_format='npy')`: Load signal from file
-- `save_signal(signal, filepath, file_format='npy')`: Save signal to file
-- `save_features(features, filepath, file_format='json')`: Save features
-- `load_features(filepath, file_format='json')`: Load features
+- `load_signal(filepath, file_format='auto')`: Load signal from file
+- `save_signal(signal, filepath, file_format='auto')`: Save signal to file
+- `save_features(features, filepath, file_format='auto')`: Save features
+- `load_features(filepath, file_format='auto')`: Load features
 
 ### SignalUtils
 
@@ -428,6 +478,34 @@ SignalUtils()
 - energy ratios between components
 - kl_divergence between components
 
+## Choosing Methods
+
+### Which Decomposition Should I Use?
+
+- Use `fourier` when the signal is roughly stationary and you mainly care about dominant frequencies, spectral spread, or band energy.
+- Use `stft` when frequencies change over time and you need a compact time-frequency summary without the full cost of adaptive methods.
+- Use `dwt` when you want a fast, robust default for denoising or multiscale structure. It is usually the best first choice for production pipelines.
+- Use `wpd` when you want a denser wavelet tree than DWT and are willing to trade speed and simplicity for extra sub-band detail.
+- Use `emd` when the signal is nonlinear or non-stationary and you want data-driven intrinsic mode functions instead of fixed basis functions.
+- Use `vmd` when you want cleaner, more stable band-limited modes than EMD and can afford tuning `K` and `alpha`.
+- Use `svmd` when you want VMD-like behavior but prefer sequential mode discovery over specifying a fixed mode count up front.
+- Use `efd` when you want adaptive frequency-band decomposition with explicit frequency segmentation behavior.
+
+### Preprocessing Defaults
+
+- Use `detrend_method='linear'`, `denoise_method='wavelet'`, and `normalize_method='zscore'` as general-purpose defaults.
+- Use `detrend_method='als'` when the signal has a curved baseline or slow drift under mostly positive peaks, such as spectroscopy or biomedical traces.
+- Use `denoise_method='bandpass'` when you know the band of interest ahead of time.
+- Use `denoise_method='notch'` to remove narrow interference such as 50/60 Hz line noise.
+- Use `normalize_method='robust'` when spikes or outliers make z-score scaling unstable.
+
+### Practical Heuristics
+
+- Start with raw features plus `fourier` and `dwt` if you want a fast, stable baseline.
+- Add `stft`, `emd`, or `vmd` only when the problem really depends on non-stationary structure.
+- Prefer `extract_windowed(...)` when labels or events vary over time inside a long recording.
+- Prefer `extract_multichannel(...)` when relationships between channels matter, since it adds coherence, cross-correlation, and PLV summaries.
+
 ## Advanced Topics
 
 ### Custom Wavelet Selection
@@ -485,6 +563,25 @@ with Pool(processes=4) as pool:
 - **Decomposition Methods**: EMD and VMD are computationally expensive; use DWT for faster processing
 - **Feature Count**: Extracting all features with all decomposition methods can yield 200+ features
 - **Memory**: VMD and SVMD require more memory for long signals
+
+## Benchmarking
+
+Run the local benchmark script to compare common extraction workflows on your
+machine:
+
+```bash
+python benchmarks/benchmark_feature_extraction.py
+```
+
+Useful options:
+
+- `--repeats 10` for a more stable timing estimate
+- `--include-slow` to include an EMD benchmark
+- `--json` to emit machine-readable benchmark output
+
+The script reports median/mean/best runtime, standard deviation, peak traced
+memory, and any runtime notes such as thread fallback when process-based
+parallelism is unavailable.
 
 ## Troubleshooting
 

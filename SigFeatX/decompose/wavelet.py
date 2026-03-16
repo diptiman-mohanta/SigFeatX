@@ -2,7 +2,10 @@
 
 import numpy as np
 import pywt
+import warnings
 from typing import List, Dict, Optional
+
+from SigFeatX._validation import validate_signal_1d
 
 
 class WaveletDecomposer:
@@ -28,9 +31,13 @@ class WaveletDecomposer:
         Returns:
             List of wavelet coefficients [cA_n, cD_n, cD_n-1, ..., cD_1]
         """
+        signal = validate_signal_1d(signal, name='signal')
+        if level is not None and level < 1:
+            raise ValueError(f"level must be >= 1; got {level}.")
         if level is None:
             level = pywt.dwt_max_level(len(signal), self.wavelet)
-        
+        level = max(1, int(level))
+
         coeffs = pywt.wavedec(signal, self.wavelet, level=level)
         return coeffs
     
@@ -58,6 +65,9 @@ class WaveletDecomposer:
         Returns:
             Dictionary of node paths to coefficients
         """
+        signal = validate_signal_1d(signal, name='signal')
+        if level < 1:
+            raise ValueError(f"level must be >= 1; got {level}.")
         wp = pywt.WaveletPacket(data=signal, wavelet=self.wavelet, maxlevel=level)
         nodes = [node.path for node in wp.get_level(level, order=order)]
         return {node: wp[node].data for node in nodes}
@@ -73,10 +83,25 @@ class WaveletDecomposer:
         Returns:
             CWT coefficients
         """
+        signal = validate_signal_1d(signal, name='signal')
         if scales is None:
-            scales = np.arange(1, min(128, len(signal) // 2))
-        
-        coeffs, _ = pywt.cwt(signal, scales, self.wavelet)
+            upper = max(2, min(128, len(signal) // 2))
+            scales = np.arange(1, upper)
+        scales = np.asarray(scales)
+        if scales.ndim != 1 or len(scales) == 0:
+            raise ValueError("scales must be a non-empty 1D array.")
+        if np.any(scales <= 0):
+            raise ValueError("scales must contain only positive values.")
+
+        try:
+            coeffs, _ = pywt.cwt(signal, scales, self.wavelet)
+        except (AttributeError, ValueError):
+            warnings.warn(
+                f"Wavelet '{self.wavelet}' is not suitable for CWT; falling back to 'morl'.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            coeffs, _ = pywt.cwt(signal, scales, 'morl')
         return coeffs
     
     def swt(self, signal: np.ndarray, level: int = 1) -> List[tuple[np.ndarray, np.ndarray]]:
@@ -90,4 +115,7 @@ class WaveletDecomposer:
         Returns:
             List of (approximation, detail) coefficient pairs
         """
+        signal = validate_signal_1d(signal, name='signal')
+        if level < 1:
+            raise ValueError(f"level must be >= 1; got {level}.")
         return pywt.swt(signal, self.wavelet, level=level)
