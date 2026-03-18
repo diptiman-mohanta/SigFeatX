@@ -24,15 +24,29 @@ New additions in this version:
         - cross-correlation (peak value and lag)
         - phase-locking value (PLV)
 
+  Sliding-window analysis:
+    extract_windowed(signal, window_size, step_size)
+      Splits a 1D signal into overlapping windows and runs the standard
+      feature pipeline on each window. Returns a BatchResult with window
+      metadata columns for downstream modelling or visualisation.
+
 All original APIs (extract_all_features, run_pipeline) are UNCHANGED.
 """
 
 import warnings
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Union
 
+from ._validation import (
+    validate_n_jobs,
+    validate_sampling_rate,
+    validate_signal_1d,
+    validate_signal_batch,
+    validate_signal_matrix,
+    validate_unique_names,
+)
 from .preprocess import SignalPreprocessor
 from .decompose import (
     FourierTransform, ShortTimeFourierTransform, WaveletDecomposer,
@@ -123,11 +137,11 @@ class FeatureAggregator:
     """Main class for the SigFeatX feature extraction pipeline."""
 
     def __init__(self, fs: float = 1.0):
-        self.fs = fs
+        self.fs = validate_sampling_rate(fs)
         self.preprocessor = SignalPreprocessor()
 
-        self.ft      = FourierTransform(fs=fs)
-        self.stft    = ShortTimeFourierTransform(fs=fs)
+        self.ft      = FourierTransform(fs=self.fs)
+        self.stft    = ShortTimeFourierTransform(fs=self.fs)
         self.wavelet = WaveletDecomposer()
         self.emd     = EMD()
         self.vmd     = VMD()
@@ -152,10 +166,13 @@ class FeatureAggregator:
                    normalize: bool = True,
                    detrend: bool = True,
                    **kwargs) -> np.ndarray:
+        signal = validate_signal_1d(signal, name='signal')
         processed = signal.copy()
         if detrend:
             processed = self.preprocessor.detrend(
-                processed, method=kwargs.get('detrend_method', 'linear'))
+                processed,
+                method=kwargs.get('detrend_method', 'linear'),
+                **kwargs.get('detrend_params', {}))
         if denoise:
             processed = self.preprocessor.denoise(
                 processed,
@@ -182,6 +199,7 @@ class FeatureAggregator:
     ) -> Dict[str, float]:
         if decomposition_methods is None:
             decomposition_methods = ['fourier', 'dwt']
+        signal = validate_signal_1d(signal, name='signal')
 
         all_features: Dict[str, float] = {}
         self.last_quality_reports = {}
@@ -265,15 +283,17 @@ class FeatureAggregator:
         except ImportError:
             raise ImportError("pandas is required for extract_batch(). pip install pandas")
 
-        if isinstance(signals, np.ndarray) and signals.ndim == 2:
-            signals = [signals[i] for i in range(signals.shape[0])]
+        if on_error not in {'warn', 'raise'}:
+            raise ValueError(f"on_error must be 'warn' or 'raise'; got {on_error!r}.")
 
+        signals = validate_signal_batch(signals, name='signals', require_finite=False)
         n_signals = len(signals)
 
         if n_jobs == -1:
             import os
             n_jobs = os.cpu_count() or 1
-        n_jobs = max(1, int(n_jobs))
+        else:
+            n_jobs = validate_n_jobs(n_jobs)
 
         extract_kwargs = dict(
             decomposition_methods=decomposition_methods,
@@ -285,6 +305,17 @@ class FeatureAggregator:
 
         results: Dict[int, Optional[Dict[str, float]]] = {}
         errors:  Dict[int, Exception] = {}
+
+        if n_signals == 0:
+            df = pd.DataFrame()
+            df.index.name = 'signal_idx'
+            return BatchResult(
+                dataframe=df,
+                errors=errors,
+                n_success=0,
+                n_failed=0,
+                feature_names=[],
+            )
 
         if n_jobs == 1:
             for i, sig in enumerate(signals):
@@ -303,28 +334,26 @@ class FeatureAggregator:
                     results[i] = None
                     errors[i]  = exc
         else:
-            with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = {
-                    executor.submit(_worker_extract, sig, self.fs, extract_kwargs): i
-                    for i, sig in enumerate(signals)
-                }
-                completed = 0
-                for future in as_completed(futures):
-                    i = futures[future]
-                    completed += 1
-                    if show_progress:
-                        print(f"\r  Batch: {completed}/{n_signals}", end="", flush=True)
-                    try:
-                        results[i] = future.result()
-                    except Exception as exc:
-                        if on_error == 'raise':
-                            raise
-                        warnings.warn(
-                            f"[SigFeatX] extract_batch: signal {i} failed: {exc}",
-                            RuntimeWarning, stacklevel=2,
-                        )
-                        results[i] = None
-                        errors[i]  = exc
+            task_results = _run_parallel_extract(
+                {i: sig for i, sig in enumerate(signals)},
+                fs=self.fs,
+                extract_kwargs=extract_kwargs,
+                max_workers=n_jobs,
+                show_progress=show_progress,
+                total=n_signals,
+            )
+            for i, outcome in task_results.items():
+                if isinstance(outcome, Exception):
+                    if on_error == 'raise':
+                        raise outcome
+                    warnings.warn(
+                        f"[SigFeatX] extract_batch: signal {i} failed: {outcome}",
+                        RuntimeWarning, stacklevel=2,
+                    )
+                    results[i] = None
+                    errors[i] = outcome
+                else:
+                    results[i] = outcome
 
         if show_progress:
             print()
@@ -355,6 +384,82 @@ class FeatureAggregator:
             n_failed=n_failed,
             feature_names=feature_names,
         )
+
+    def extract_windowed(
+        self,
+        signal: np.ndarray,
+        window_size: int,
+        step_size: int,
+        decomposition_methods: Optional[List[str]] = None,
+        preprocess_signal: bool = True,
+        validate: bool = False,
+        check_consistency: bool = False,
+        n_jobs: int = 1,
+        on_error: str = 'warn',
+        include_window_metadata: bool = True,
+        **preprocess_kwargs,
+    ) -> "BatchResult":
+        """
+        Extract features from overlapping sliding windows of a 1D signal.
+
+        Parameters
+        ----------
+        signal                 : input 1D signal.
+        window_size            : number of samples per window.
+        step_size              : hop size between successive windows.
+        include_window_metadata: prepend window/sample/time columns to the
+                                 returned dataframe. `end_sample` is exclusive.
+
+        Returns
+        -------
+        BatchResult where each row corresponds to one window.
+        """
+        signal = np.asarray(signal, dtype=float)
+        signal = validate_signal_1d(signal, name='signal')
+        if window_size <= 0:
+            raise ValueError(f"window_size must be > 0; got {window_size}.")
+        if step_size <= 0:
+            raise ValueError(f"step_size must be > 0; got {step_size}.")
+        if len(signal) < window_size:
+            raise ValueError(
+                f"window_size ({window_size}) cannot exceed signal length ({len(signal)})."
+            )
+
+        starts = list(range(0, len(signal) - window_size + 1, step_size))
+        windows = [signal[start : start + window_size] for start in starts]
+
+        result = self.extract_batch(
+            windows,
+            decomposition_methods=decomposition_methods,
+            preprocess_signal=preprocess_signal,
+            validate=validate,
+            check_consistency=check_consistency,
+            n_jobs=n_jobs,
+            on_error=on_error,
+            **preprocess_kwargs,
+        )
+
+        if include_window_metadata:
+            df = result.dataframe.copy()
+            window_idx = np.arange(len(df), dtype=int)
+            if len(df) > 0:
+                try:
+                    index_idx = df.index.to_numpy(dtype=int)
+                    if np.all((index_idx >= 0) & (index_idx < len(starts))):
+                        window_idx = index_idx
+                except (TypeError, ValueError):
+                    pass
+
+            starts_arr = np.asarray(starts, dtype=int)
+            end_arr = starts_arr + window_size
+            df.insert(0, 'window_idx', window_idx)
+            df.insert(1, 'start_sample', starts_arr[window_idx])
+            df.insert(2, 'end_sample', end_arr[window_idx])
+            df.insert(3, 'start_time_s', starts_arr[window_idx].astype(float) / self.fs)
+            df.insert(4, 'end_time_s', end_arr[window_idx].astype(float) / self.fs)
+            result.dataframe = df
+
+        return result
 
     # ------------------------------------------------------------------
     # NEW: Multi-channel extraction
@@ -387,16 +492,14 @@ class FeatureAggregator:
         Flat dict with per-channel keys prefixed by channel name, plus
         cross-channel keys prefixed by 'cross_CHa_CHb_'.
         """
-        signals_2d = np.asarray(signals_2d, dtype=float)
-        if signals_2d.ndim != 2:
-            raise ValueError(
-                f"signals_2d must be shape (n_channels, N); got {signals_2d.shape}."
-            )
+        signals_2d = validate_signal_matrix(signals_2d, name='signals_2d')
+        n_jobs = validate_n_jobs(n_jobs)
 
         n_channels, N = signals_2d.shape
 
         if channel_names is None:
             channel_names = [f'ch{i}' for i in range(n_channels)]
+        channel_names = validate_unique_names(channel_names, name='channel_names')
         if len(channel_names) != n_channels:
             raise ValueError(
                 f"len(channel_names)={len(channel_names)} != n_channels={n_channels}."
@@ -420,16 +523,16 @@ class FeatureAggregator:
         else:
             import os
             workers = (os.cpu_count() or 1) if n_jobs == -1 else n_jobs
-            with ProcessPoolExecutor(max_workers=workers) as executor:
-                futures = {
-                    executor.submit(
-                        _worker_extract, signals_2d[i], self.fs, extract_kwargs
-                    ): channel_names[i]
-                    for i in range(n_channels)
-                }
-                for future in as_completed(futures):
-                    ch_name = futures[future]
-                    channel_features[ch_name] = future.result()
+            task_results = _run_parallel_extract(
+                {channel_names[i]: signals_2d[i] for i in range(n_channels)},
+                fs=self.fs,
+                extract_kwargs=extract_kwargs,
+                max_workers=workers,
+            )
+            for ch_name, outcome in task_results.items():
+                if isinstance(outcome, Exception):
+                    raise outcome
+                channel_features[ch_name] = outcome
 
         all_features: Dict[str, float] = {}
         for ch_name, feats in channel_features.items():
@@ -513,6 +616,7 @@ class FeatureAggregator:
     ) -> Tuple[Dict[str, float], PipelineMetadata]:
         preprocess_params     = preprocess_params or {}
         decomposition_methods = decomposition_methods or ["fourier", "dwt"]
+        signal = validate_signal_1d(signal, name='signal')
 
         meta = PipelineMetadata(
             fs=self.fs,
@@ -694,3 +798,46 @@ def _worker_extract(
     """Worker for parallel batch and multi-channel extraction."""
     agg = FeatureAggregator(fs=fs)
     return agg.extract_all_features(sig, **extract_kwargs)
+
+
+def _run_parallel_extract(
+    tasks: Dict[Any, np.ndarray],
+    *,
+    fs: float,
+    extract_kwargs: dict,
+    max_workers: int,
+    show_progress: bool = False,
+    total: Optional[int] = None,
+) -> Dict[Any, Union[Dict[str, float], Exception]]:
+    """Run extraction tasks with a process pool, falling back to threads if needed."""
+    total = len(tasks) if total is None else total
+
+    def _execute(executor_cls):
+        outputs: Dict[Any, Union[Dict[str, float], Exception]] = {}
+        with executor_cls(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_worker_extract, sig, fs, extract_kwargs): key
+                for key, sig in tasks.items()
+            }
+            completed = 0
+            for future in as_completed(futures):
+                key = futures[future]
+                completed += 1
+                if show_progress:
+                    print(f"\r  Batch: {completed}/{total}", end="", flush=True)
+                try:
+                    outputs[key] = future.result()
+                except Exception as exc:
+                    outputs[key] = exc
+        return outputs
+
+    try:
+        return _execute(ProcessPoolExecutor)
+    except (OSError, PermissionError) as exc:
+        warnings.warn(
+            "[SigFeatX] Process-based parallelism is unavailable in this environment; "
+            "falling back to threads.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return _execute(ThreadPoolExecutor)

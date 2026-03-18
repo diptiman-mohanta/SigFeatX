@@ -4,6 +4,8 @@ import numpy as np
 from scipy import signal
 from typing import Tuple, Optional
 
+from SigFeatX._validation import validate_sampling_rate, validate_signal_1d
+
 
 class ShortTimeFourierTransform:
     """Short-Time Fourier Transform (STFT)."""
@@ -19,9 +21,16 @@ class ShortTimeFourierTransform:
             noverlap: Number of points to overlap between segments
             window: Window function to use
         """
-        self.fs = fs
+        self.fs = validate_sampling_rate(fs)
+        if nperseg < 1:
+            raise ValueError(f"nperseg must be >= 1; got {nperseg}.")
         self.nperseg = nperseg
         self.noverlap = noverlap if noverlap is not None else nperseg // 2
+        if self.noverlap < 0 or self.noverlap >= self.nperseg:
+            raise ValueError(
+                f"noverlap must be in [0, nperseg); got noverlap={self.noverlap}, "
+                f"nperseg={self.nperseg}."
+            )
         self.window = window
     
     def transform(self, sig: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -34,6 +43,7 @@ class ShortTimeFourierTransform:
         Returns:
             Tuple of (frequencies, times, STFT magnitude)
         """
+        sig = validate_signal_1d(sig, name='sig')
         nperseg = min(self.nperseg, len(sig))
         noverlap = min(self.noverlap, nperseg - 1)
         

@@ -22,6 +22,8 @@ API is identical to the original: decompose(sig) → array of shape (K, N)
 import numpy as np
 from scipy.fft import fft, ifft, fftfreq
 
+from SigFeatX._validation import validate_signal_1d
+
 
 class VMD:
     """
@@ -47,6 +49,18 @@ class VMD:
     def __init__(self, alpha: float = 2000, K: int = 3, tau: float = 0.0,
                  DC: bool = False, init: int = 1, tol: float = 1e-7,
                  max_iter: int = 500):
+        if alpha <= 0:
+            raise ValueError(f"alpha must be > 0; got {alpha}.")
+        if K < 1:
+            raise ValueError(f"K must be >= 1; got {K}.")
+        if tau < 0:
+            raise ValueError(f"tau must be >= 0; got {tau}.")
+        if init not in (0, 1, 2):
+            raise ValueError(f"init must be 0, 1, or 2; got {init}.")
+        if tol <= 0:
+            raise ValueError(f"tol must be > 0; got {tol}.")
+        if max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
         self.alpha    = alpha
         self.K        = K
         self.tau      = tau
@@ -63,7 +77,7 @@ class VMD:
         -------
         np.ndarray of shape (K, N) — one row per mode, time domain.
         """
-        sig = np.asarray(sig, dtype=float)
+        sig = validate_signal_1d(sig, name='sig')
         N   = len(sig)
 
         # Mirror-extend to reduce boundary effects (standard VMD pre-processing)

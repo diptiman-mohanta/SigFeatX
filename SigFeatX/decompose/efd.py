@@ -22,6 +22,8 @@ import numpy as np
 from scipy import signal as scipy_signal
 from scipy.fft import fft, ifft, fftfreq
 
+from SigFeatX._validation import validate_signal_1d
+
 
 class EFD:
     """
@@ -39,6 +41,12 @@ class EFD:
     """
 
     def __init__(self, n_modes: int = 5, peak_prominence: float = 0.1):
+        if n_modes < 1:
+            raise ValueError(f"n_modes must be >= 1; got {n_modes}.")
+        if peak_prominence < 0:
+            raise ValueError(
+                f"peak_prominence must be >= 0; got {peak_prominence}."
+            )
         self.n_modes         = n_modes
         self.peak_prominence = peak_prominence
 
@@ -50,7 +58,7 @@ class EFD:
         -------
         np.ndarray of shape (n_modes, N)
         """
-        sig = np.asarray(sig, dtype=float)
+        sig = validate_signal_1d(sig, name='sig')
         N   = len(sig)
 
         fft_sig  = fft(sig)

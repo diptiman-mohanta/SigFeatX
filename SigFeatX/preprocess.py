@@ -5,9 +5,11 @@ SigFeatX - preprocess.py
 import warnings
 import numpy as np
 from scipy import signal as scipy_signal
-from scipy.sparse import diags, eye
+from scipy.sparse import diags
 from scipy.sparse.linalg import spsolve
 from typing import Optional
+
+from ._validation import validate_sampling_rate, validate_signal_1d
 
 
 class SignalPreprocessor:
@@ -32,6 +34,7 @@ class SignalPreprocessor:
                  'notch'     — zero-phase notch      [NEW]
         kwargs : passed to the specific filter; see individual methods.
         """
+        sig = validate_signal_1d(sig, name='sig')
         if method == 'wavelet':
             return self._denoise_wavelet(sig, **kwargs)
         elif method == 'median':
@@ -51,6 +54,7 @@ class SignalPreprocessor:
     def _denoise_wavelet(self, sig: np.ndarray, wavelet: str = 'db4',
                          level: int = 1) -> np.ndarray:
         """Wavelet soft-thresholding denoising (original, unchanged)."""
+        sig = validate_signal_1d(sig, name='sig')
         try:
             import pywt
         except ImportError:
@@ -65,15 +69,27 @@ class SignalPreprocessor:
 
     def _denoise_median(self, sig: np.ndarray, kernel_size: int = 3) -> np.ndarray:
         """Median filter denoising (original, unchanged)."""
+        sig = validate_signal_1d(sig, name='sig')
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError(
+                f"kernel_size must be a positive odd integer; got {kernel_size}."
+            )
         return scipy_signal.medfilt(sig, kernel_size=kernel_size)
 
     def _denoise_lowpass(self, sig: np.ndarray, cutoff: float = 0.1,
                          order: int = 4, fs: float = 1.0) -> np.ndarray:
         """Butterworth low-pass filter (original, unchanged)."""
+        sig = validate_signal_1d(sig, name='sig')
+        fs = validate_sampling_rate(fs)
+        if cutoff <= 0:
+            raise ValueError(f"cutoff must be > 0; got {cutoff}.")
+        if order < 1:
+            raise ValueError(f"order must be >= 1; got {order}.")
         nyq = fs / 2
         norm_cutoff = cutoff / nyq
         norm_cutoff = np.clip(norm_cutoff, 1e-4, 0.9999)
         b, a = scipy_signal.butter(order, norm_cutoff, btype='low')
+        _validate_filtfilt_length(sig, b, a)
         return scipy_signal.filtfilt(b, a, sig)
 
     # ------------------------------------------------------------------
@@ -109,7 +125,10 @@ class SignalPreprocessor:
         filtered = preprocessor.denoise(sig, method='bandpass',
                                         low_hz=8, high_hz=30, fs=250)
         """
-        sig = np.asarray(sig, dtype=float)
+        sig = validate_signal_1d(sig, name='sig')
+        fs = validate_sampling_rate(fs)
+        if order < 1:
+            raise ValueError(f"order must be >= 1; got {order}.")
         nyq = fs / 2.0
 
         if low_hz <= 0:
@@ -129,6 +148,7 @@ class SignalPreprocessor:
         high = np.clip(high, 1e-4, 0.9999)
 
         b, a = scipy_signal.butter(order, [low, high], btype='band')
+        _validate_filtfilt_length(sig, b, a)
         return scipy_signal.filtfilt(b, a, sig)
 
     # ------------------------------------------------------------------
@@ -167,7 +187,12 @@ class SignalPreprocessor:
         # As a denoise method
         cleaned = preprocessor.denoise(sig, method='notch', freq_hz=50, fs=256)
         """
-        sig = np.asarray(sig, dtype=float)
+        sig = validate_signal_1d(sig, name='sig')
+        fs = validate_sampling_rate(fs)
+        if quality_factor <= 0:
+            raise ValueError(
+                f"quality_factor must be > 0; got {quality_factor}."
+            )
         nyq = fs / 2.0
 
         if freq_hz <= 0 or freq_hz >= nyq:
@@ -177,13 +202,15 @@ class SignalPreprocessor:
 
         norm_freq = freq_hz / nyq
         b, a      = scipy_signal.iirnotch(norm_freq, Q=quality_factor)
+        _validate_filtfilt_length(sig, b, a)
         return scipy_signal.filtfilt(b, a, sig)
 
     # ------------------------------------------------------------------
     # Detrending (extended with ALS)
     # ------------------------------------------------------------------
 
-    def detrend(self, sig: np.ndarray, method: str = 'linear') -> np.ndarray:
+    def detrend(self, sig: np.ndarray, method: str = 'linear',
+                **kwargs) -> np.ndarray:
         """
         Remove trend from signal.
 
@@ -193,13 +220,16 @@ class SignalPreprocessor:
         method : 'linear'   — subtract least-squares linear fit (original)
                  'constant' — subtract mean (original)
                  'als'      — Asymmetric Least Squares baseline (NEW)
+        kwargs : forwarded to the selected detrend method. For `als`, this
+                 includes `lam`, `p`, and `n_iter`.
         """
+        sig = validate_signal_1d(sig, name='sig')
         if method == 'linear':
             return scipy_signal.detrend(sig, type='linear')
         elif method == 'constant':
             return scipy_signal.detrend(sig, type='constant')
         elif method == 'als':
-            baseline = self.als_baseline(sig)
+            baseline = self.als_baseline(sig, **kwargs)
             return sig - baseline
         else:
             raise ValueError(
@@ -253,7 +283,13 @@ class SignalPreprocessor:
         # Or via detrend:
         corrected = preprocessor.detrend(sig, method='als')
         """
-        sig = np.asarray(sig, dtype=float)
+        sig = validate_signal_1d(sig, name='sig', min_length=3)
+        if lam <= 0:
+            raise ValueError(f"lam must be > 0; got {lam}.")
+        if not 0 < p < 1:
+            raise ValueError(f"p must be in (0, 1); got {p}.")
+        if n_iter < 1:
+            raise ValueError(f"n_iter must be >= 1; got {n_iter}.")
         N   = len(sig)
 
         # Second-order difference matrix D of size (N-2, N)
@@ -291,6 +327,7 @@ class SignalPreprocessor:
                  'minmax' — scale to [0, 1]
                  'robust' — subtract median, divide by IQR
         """
+        sig = validate_signal_1d(sig, name='sig')
         if method == 'zscore':
             mu, sigma = np.mean(sig), np.std(sig)
             return (sig - mu) / (sigma + 1e-10)
@@ -322,6 +359,9 @@ class SignalPreprocessor:
                  'linear'  — linear interpolation (no anti-aliasing; not
                              recommended for downsampling)
         """
+        sig = validate_signal_1d(sig, name='sig')
+        original_fs = validate_sampling_rate(original_fs, name='original_fs')
+        target_fs = validate_sampling_rate(target_fs, name='target_fs')
         target_len = int(len(sig) * target_fs / original_fs)
 
         if method == 'fourier':
@@ -351,3 +391,13 @@ def _second_diff_matrix(n: int):
     D    = diags([e[:-2], -2 * e[:-1], e], offsets=[0, 1, 2],
                  shape=(n - 2, n), format='csr')
     return D
+
+
+def _validate_filtfilt_length(sig: np.ndarray, b: np.ndarray, a: np.ndarray):
+    """Raise a clear error when a signal is too short for zero-phase filtering."""
+    min_len = 3 * max(len(a), len(b))
+    if len(sig) <= min_len:
+        raise ValueError(
+            f"sig must contain more than {min_len} samples for zero-phase filtering; "
+            f"got {len(sig)}."
+        )
