@@ -50,7 +50,7 @@ from ._validation import (
 from .preprocess import SignalPreprocessor
 from .decompose import (
     FourierTransform, ShortTimeFourierTransform, WaveletDecomposer,
-    EMD, VMD, SVMD, EFD,
+    EMD, VMD, SVMD, EFD, LMD, JMD,
 )
 from .features.features import (
     TimeDomainFeatures, FrequencyDomainFeatures,
@@ -147,6 +147,8 @@ class FeatureAggregator:
         self.vmd     = VMD()
         self.svmd    = SVMD()
         self.efd     = EFD()
+        self.lmd     = LMD()
+        self.jmd     = JMD()
 
         self.time_features      = TimeDomainFeatures()
         self.freq_features      = FrequencyDomainFeatures()
@@ -669,6 +671,11 @@ class FeatureAggregator:
             if method == "svmd":
                 stage_params["K_max"] = self.svmd.K_max
                 stage_params["alpha"] = self.svmd.alpha
+            if method == "lmd":
+                stage_params["max_pf"] = self.lmd.max_pf
+            if method == "jmd":
+                stage_params["K"]    = self.jmd.K
+                stage_params["beta"] = self.jmd.beta
 
             if quality_report is not None:
                 all_features.update(self._add_prefix(quality_report.to_dict(), method))
@@ -754,12 +761,31 @@ class FeatureAggregator:
             features.update(self.decomp_features.extract_from_components(modes_list, 'efd'))
             if validate:
                 quality_report = DecompositionValidator.evaluate(sig, modes, method="EFD")
+        elif method == 'lmd':
+            pfs = self.lmd.decompose(sig)
+            features.update(self.decomp_features.extract_from_components(pfs, 'lmd'))
+            if validate:
+                quality_report = DecompositionValidator.evaluate(sig, pfs, method="LMD")
+ 
+        elif method == 'jmd':
+            modes, jump = self.jmd.decompose(sig)
+            modes_list  = [modes[i] for i in range(len(modes))]
+            # Treat the jump as an extra component so feature extraction covers it.
+            all_components = modes_list + [jump]
+            features.update(self.decomp_features.extract_from_components(all_components, 'jmd'))
+            # Jump-specific summary features
+            features['jmd_jump_energy']  = float(np.sum(jump ** 2))
+            features['jmd_jump_rms']     = float(np.sqrt(np.mean(jump ** 2)))
+            features['jmd_jump_n_steps'] = float(_count_jump_steps(jump))
+            if validate:
+                quality_report = DecompositionValidator.evaluate(sig, modes, method="JMD")
+ 
         else:
             raise ValueError(
                 f"Unknown decomposition method '{method}'. "
-                "Valid: 'fourier','stft','dwt','wpd','emd','vmd','svmd','efd'."
+                "Valid: 'fourier','stft','dwt','wpd','emd','vmd','svmd','efd','lmd','jmd'."
             )
-
+        
         violations = validate_feature_dict(features, method=method)
         for v in violations:
             warnings.warn(str(v), RuntimeWarning, stacklevel=3)
@@ -841,3 +867,18 @@ def _run_parallel_extract(
             stacklevel=3,
         )
         return _execute(ThreadPoolExecutor)
+
+def _count_jump_steps(jump: np.ndarray, threshold_ratio: float = 0.1) -> int:
+    """      
+      Count significant step-changes in the extracted jump component
+        A step is any point where |jump'[i]| > threshold_ratio * max|jump'|.
+        Returns an integer count stored as float for compatibility with the
+        feature dict (all values are float).
+    """
+    if len(jump) < 2:
+        return 0
+    deriv     = np.diff(jump)
+    max_deriv = np.max(np.abs(deriv))
+    if max_deriv < 1e-10:
+        return 0
+    return int(np.sum(np.abs(deriv) > threshold_ratio * max_deriv))
