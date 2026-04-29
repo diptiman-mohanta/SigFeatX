@@ -2,26 +2,26 @@
 VMD — Variational Mode Decomposition
 Reference: Dragomiretskiy & Zosso (2014), IEEE Trans. Signal Processing 62(3):531-544
 
-Complete rewrite vs original. The original was a static Butterworth filterbank
-with fixed frequency boundaries — not VMD. True VMD solves a constrained
-variational problem using ADMM entirely in the Fourier domain.
+Implementation ported from the well-established Python reference by
+Vinícius Rezende Carvalho (vrcarva@gmail.com), itself based on Dominique
+Zosso's original MATLAB code.
 
-The ADMM update equations (from the paper, Algorithm 1):
-
-  For each mode k at each iteration n:
-    û_k^{n+1}(ω) = [f̂(ω) - Σ_{i≠k} û_i(ω) + λ̂(ω)/2]
-                   / [1 + 2α(ω - ω_k)²]
-
-  ω_k^{n+1} = ∫₀^∞ ω |û_k(ω)|² dω / ∫₀^∞ |û_k(ω)|² dω
-
-  λ̂^{n+1}(ω) = λ̂^n(ω) + τ [f̂(ω) - Σ_k û_k^{n+1}(ω)]
-
-API is identical to the original: decompose(sig) → array of shape (K, N)
+Key design decisions (all from the reference):
+  1. Mirror extension: the signal is extended with flip(f[:N//2]) prepended
+     and flip(f[-N//2:]) appended before taking the FFT. This prevents
+     boundary Gibbs phenomena that plague the naive one-shot FFT approach.
+  2. fftshift / ifftshift: the spectrum is shifted so DC is at the centre.
+     Frequency axis is t - 0.5 - 1/T (NOT scipy fftfreq).
+  3. One-sided positive spectrum: f_hat_plus[:T//2] = 0 zeroes the negative
+     half after shifting, giving the analytic signal.
+  4. Reconstruction: the final u_hat is built by conjugate-mirroring the
+     positive half back onto the negative half, then ifft(ifftshift(...)).
+     This is the standard way to recover a real signal from a one-sided
+     analytic spectrum.
+  5. De-mirroring: only the central quarter u[:, T//4 : 3*T//4] is kept.
 """
 
 import numpy as np
-from scipy.fft import fft, ifft, fftfreq
-
 from SigFeatX._validation import validate_signal_1d
 
 
@@ -31,24 +31,25 @@ class VMD:
 
     Parameters
     ----------
-    alpha    : bandwidth constraint (balancing parameter). Larger = narrower modes.
-               Typical values: 100–5000. Default 2000.
-    K        : number of modes to extract. Must be set in advance.
-    tau      : dual ascent step (Lagrangian multiplier update rate).
-               0 = no noise tolerance (strict reconstruction).
-               Increase for noisy signals (e.g. 0.25).
-    DC       : if True, the first mode is forced to zero frequency (DC component).
-    init     : centre frequency initialisation.
-               0 = all start at 0 Hz
-               1 = uniformly distributed across [0, 0.5] (recommended)
-               2 = random
+    alpha    : bandwidth constraint (balancing parameter). Default 2000.
+    K        : number of modes to extract.
+    tau      : dual ascent step. 0 = noise-tolerant. Default 0.0.
+    DC       : if True, force first mode to zero frequency (DC). Default False.
+    init     : centre-frequency init: 0=zeros, 1=uniform, 2=random. Default 1.
     tol      : convergence tolerance. Default 1e-7.
     max_iter : maximum ADMM iterations. Default 500.
     """
 
-    def __init__(self, alpha: float = 2000, K: int = 3, tau: float = 0.0,
-                 DC: bool = False, init: int = 1, tol: float = 1e-7,
-                 max_iter: int = 500):
+    def __init__(
+        self,
+        alpha: float = 2000,
+        K: int = 3,
+        tau: float = 0.0,
+        DC: bool = False,
+        init: int = 1,
+        tol: float = 1e-7,
+        max_iter: int = 500,
+    ):
         if alpha <= 0:
             raise ValueError(f"alpha must be > 0; got {alpha}.")
         if K < 1:
@@ -61,6 +62,7 @@ class VMD:
             raise ValueError(f"tol must be > 0; got {tol}.")
         if max_iter < 1:
             raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
+
         self.alpha    = alpha
         self.K        = K
         self.tau      = tau
@@ -69,89 +71,156 @@ class VMD:
         self.tol      = tol
         self.max_iter = max_iter
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def decompose(self, sig: np.ndarray) -> np.ndarray:
         """
         Decompose signal into K variational modes.
 
+        Parameters
+        ----------
+        sig : 1-D numpy array
+
         Returns
         -------
-        np.ndarray of shape (K, N) — one row per mode, time domain.
+        modes : np.ndarray of shape (K, len(sig))
+            One row per mode, time domain, same length as input.
         """
         sig = validate_signal_1d(sig, name='sig')
-        N   = len(sig)
 
-        # Mirror-extend to reduce boundary effects (standard VMD pre-processing)
-        T       = N
-        f_hat   = fft(sig)                        # full spectrum, shape (N,)
-        omega   = fftfreq(N)                      # normalised frequencies
+        # Ensure even length (reference implementation requirement)
+        if len(sig) % 2:
+            sig = sig[:-1]
 
-        # Work only on positive half-spectrum (signal is real)
-        # Paper works with analytic signal (one-sided spectrum × 2)
-        pos     = omega >= 0
-        f_hat_p = np.zeros(N, dtype=complex)
-        f_hat_p[pos] = 2.0 * f_hat[pos]          # analytic spectrum
+        N  = len(sig)
+        fs = 1.0 / N
 
-        # ── Initialise centre frequencies ──────────────────────────────────
-        omega_K = self._init_omegas()
+        # ── Mirror extension ───────────────────────────────────────────
+        # Prepend flip(sig[:N//2]) and append flip(sig[-N//2:])
+        ltemp  = N // 2
+        f_mirr = np.concatenate([
+            np.flip(sig[:ltemp]),
+            sig,
+            np.flip(sig[-ltemp:]),
+        ])
 
-        # ── ADMM state ─────────────────────────────────────────────────────
-        u_hat_K = np.zeros((self.K, N), dtype=complex)   # mode spectra
-        lambda_hat = np.zeros(N, dtype=complex)           # Lagrangian multiplier
+        T = len(f_mirr)                       # = 2*N
+        t = np.arange(1, T + 1) / T
+        freqs = t - 0.5 - (1.0 / T)          # centred frequency axis
 
-        # ── ADMM main loop ─────────────────────────────────────────────────
-        for n in range(self.max_iter):
-            u_hat_K_prev = u_hat_K.copy()
+        # ── Build analytic (positive-only) spectrum ────────────────────
+        f_hat      = np.fft.fftshift(np.fft.fft(f_mirr))
+        f_hat_plus = f_hat.copy()
+        f_hat_plus[:T // 2] = 0               # zero negative frequencies
 
-            for k in range(self.K):
-                # Accumulate all modes except k
-                sum_others = np.sum(u_hat_K, axis=0) - u_hat_K[k]
-
-                # Mode update in Fourier domain (Eq. 14 in paper)
-                # û_k(ω) = [f̂(ω) - Σ_{i≠k} û_i(ω) + λ̂(ω)/2]
-                #           / [1 + 2α(ω - ω_k)²]
-                denom         = 1.0 + 2.0 * self.alpha * (omega - omega_K[k]) ** 2
-                u_hat_K[k]    = (f_hat_p - sum_others + lambda_hat / 2.0) / denom
-
-                # Force DC mode if requested
-                if self.DC and k == 0:
-                    u_hat_K[0][omega != 0] = 0.0
-
-                # Centre frequency update (Eq. 15 in paper)
-                # ω_k = ∫ ω |û_k(ω)|² dω / ∫ |û_k(ω)|² dω
-                power         = np.abs(u_hat_K[k][pos]) ** 2
-                omega_K[k]    = np.dot(omega[pos], power) / (np.sum(power) + 1e-10)
-
-            # Lagrangian multiplier update (Eq. 16 in paper)
-            lambda_hat += self.tau * (f_hat_p - np.sum(u_hat_K, axis=0))
-
-            # ── Convergence check ──────────────────────────────────────────
-            delta = np.sum(np.abs(u_hat_K - u_hat_K_prev) ** 2) / (
-                    np.sum(np.abs(u_hat_K_prev) ** 2) + 1e-10)
-            if delta < self.tol:
-                break
-
-        # ── Convert modes back to time domain ─────────────────────────────
-        # u_hat_K contains one-sided (analytic) spectra; take real part of IFFT
-        modes = np.zeros((self.K, N))
-        for k in range(self.K):
-            modes[k] = np.real(ifft(u_hat_K[k]))
-
-        return modes
-
-    def _init_omegas(self) -> np.ndarray:
-        """Initialise centre frequencies per the 'init' parameter."""
-        if self.init == 0:
-            omega_K = np.zeros(self.K)
-        elif self.init == 1:
-            # Uniformly distributed across [0, 0.5] (normalised Nyquist)
-            omega_K = np.arange(1, self.K + 1) / (2.0 * self.K)
-        else:
-            omega_K = np.sort(np.random.rand(self.K) * 0.5)
+        # ── Initialise centre frequencies ──────────────────────────────
+        omega_plus = np.zeros((self.max_iter, self.K))
+        if self.init == 1:
+            for i in range(self.K):
+                omega_plus[0, i] = (0.5 / self.K) * i
+        elif self.init == 2:
+            omega_plus[0, :] = np.sort(
+                np.exp(
+                    np.log(fs) + (np.log(0.5) - np.log(fs)) * np.random.rand(self.K)
+                )
+            )
+        # else init==0: omega stays at 0 (already initialised)
 
         if self.DC:
-            omega_K[0] = 0.0
+            omega_plus[0, 0] = 0.0
 
-        return omega_K
+        # ── ADMM state ─────────────────────────────────────────────────
+        lambda_hat = np.zeros((self.max_iter, T), dtype=complex)
+        u_hat_plus = np.zeros((self.max_iter, T, self.K), dtype=complex)
+
+        Alpha   = self.alpha * np.ones(self.K)
+        u_diff  = self.tol + np.spacing(1)
+        n       = 0
+        sum_uk  = 0
+
+        # ── Main ADMM loop ─────────────────────────────────────────────
+        while u_diff > self.tol and n < self.max_iter - 1:
+
+            # Update first mode
+            k      = 0
+            sum_uk = (u_hat_plus[n, :, self.K - 1]
+                      + sum_uk
+                      - u_hat_plus[n, :, 0])
+
+            u_hat_plus[n + 1, :, k] = (
+                (f_hat_plus - sum_uk - lambda_hat[n, :] / 2.0)
+                / (1.0 + Alpha[k] * (freqs - omega_plus[n, k]) ** 2)
+            )
+
+            if not self.DC:
+                pos_mask = freqs[T // 2 : T]
+                pos_u    = np.abs(u_hat_plus[n + 1, T // 2 : T, k]) ** 2
+                omega_plus[n + 1, k] = (
+                    np.dot(pos_mask, pos_u) / (np.sum(pos_u) + 1e-10)
+                )
+
+            # Update remaining modes
+            for k in range(1, self.K):
+                sum_uk = (u_hat_plus[n + 1, :, k - 1]
+                          + sum_uk
+                          - u_hat_plus[n, :, k])
+
+                u_hat_plus[n + 1, :, k] = (
+                    (f_hat_plus - sum_uk - lambda_hat[n, :] / 2.0)
+                    / (1.0 + Alpha[k] * (freqs - omega_plus[n, k]) ** 2)
+                )
+
+                pos_mask = freqs[T // 2 : T]
+                pos_u    = np.abs(u_hat_plus[n + 1, T // 2 : T, k]) ** 2
+                omega_plus[n + 1, k] = (
+                    np.dot(pos_mask, pos_u) / (np.sum(pos_u) + 1e-10)
+                )
+
+            # Dual ascent
+            lambda_hat[n + 1, :] = (
+                lambda_hat[n, :]
+                + self.tau * (
+                    np.sum(u_hat_plus[n + 1, :, :], axis=1) - f_hat_plus
+                )
+            )
+
+            n += 1
+
+            # Convergence check
+            u_diff = np.spacing(1)
+            for i in range(self.K):
+                diff   = u_hat_plus[n, :, i] - u_hat_plus[n - 1, :, i]
+                u_diff += (1.0 / T) * np.real(np.dot(diff, np.conj(diff)))
+            u_diff = np.abs(u_diff)
+
+        # ── Reconstruction ─────────────────────────────────────────────
+        # Discard empty rows if converged early
+        Niter = min(self.max_iter, n)
+        omega = omega_plus[:Niter, :]           # not used externally here
+
+        # Build two-sided spectrum by conjugate mirroring
+        idxs   = np.flip(np.arange(1, T // 2 + 1))
+        u_hat  = np.zeros((T, self.K), dtype=complex)
+        u_hat[T // 2 : T, :] = u_hat_plus[Niter - 1, T // 2 : T, :]
+        u_hat[idxs, :]        = np.conj(u_hat_plus[Niter - 1, T // 2 : T, :])
+        u_hat[0, :]           = np.conj(u_hat[-1, :])
+
+        # Back to time domain via ifft(ifftshift)
+        u_full = np.zeros((self.K, T))
+        for k in range(self.K):
+            u_full[k, :] = np.real(
+                np.fft.ifft(np.fft.ifftshift(u_hat[:, k]))
+            )
+
+        # Remove mirror padding: keep central quarter
+        modes = u_full[:, T // 4 : 3 * T // 4]
+
+        # Ensure output length exactly matches original input length
+        out_len = min(modes.shape[1], N)
+        return modes[:, :out_len]
 
     def reconstruct(self, modes: np.ndarray) -> np.ndarray:
+        """Sum all modes to reconstruct the signal."""
         return np.sum(modes, axis=0)
