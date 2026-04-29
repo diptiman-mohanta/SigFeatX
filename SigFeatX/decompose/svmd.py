@@ -1,11 +1,14 @@
 """
 SVMD — Successive Variational Mode Decomposition
-Based on: Dragomiretskiy & Zosso (2014), applied successively with K=1.
+Reference: Nazari & Sakhaei (2020), Signal Processing 174:107610.
 
-Bugs fixed vs original:
-  1. tol default was 1e-7 (way too tight — SVMD never stopped early).
-     Fixed to 0.01 (stop when residual has < 1% energy of original).
-  2. Inherits corrected VMD (true ADMM, not filterbank).
+Uses the corrected VMD (with mirror extension and fftshift reconstruction).
+The successive strategy extracts K=1 mode at a time from the residual.
+
+Changes from previous version:
+  - tol default changed from 1e-7 to 0.01 (energy ratio criterion):
+    stop when residual energy < tol × original energy.
+  - Inherits VMD's mirror extension and correct amplitude reconstruction.
 """
 
 import numpy as np
@@ -17,20 +20,21 @@ class SVMD:
     """
     Successive Variational Mode Decomposition.
 
-    Extracts one VMD mode at a time from the residual, stopping when the
-    residual energy drops below `tol` fraction of the original signal energy.
-
     Parameters
     ----------
-    alpha    : VMD bandwidth parameter (passed to VMD). Default 2000.
-    K_max    : maximum number of modes to extract. Default 10.
-    tol      : stop when residual energy / original energy < tol. Default 0.01.
-               Original code used 1e-7 which effectively disabled early stopping.
+    alpha    : VMD bandwidth parameter. Default 2000.
+    K_max    : maximum modes to extract. Default 10.
+    tol      : stop when residual_energy / original_energy < tol. Default 0.01.
     max_iter : maximum ADMM iterations per VMD call. Default 500.
     """
 
-    def __init__(self, alpha: float = 2000, K_max: int = 10,
-                 tol: float = 0.01, max_iter: int = 500):
+    def __init__(
+        self,
+        alpha: float = 2000,
+        K_max: int = 10,
+        tol: float = 0.01,
+        max_iter: int = 500,
+    ):
         if alpha <= 0:
             raise ValueError(f"alpha must be > 0; got {alpha}.")
         if K_max < 1:
@@ -39,6 +43,7 @@ class SVMD:
             raise ValueError(f"tol must be >= 0; got {tol}.")
         if max_iter < 1:
             raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
+
         self.alpha    = alpha
         self.K_max    = K_max
         self.tol      = tol
@@ -53,25 +58,42 @@ class SVMD:
         np.ndarray of shape (n_modes, N)
         """
         sig = validate_signal_1d(sig, name='sig')
-        modes    = []
-        residual = sig.copy().astype(float)
-        orig_energy = np.sum(sig ** 2)
+        modes        = []
+        residual     = sig.copy().astype(float)
+        orig_energy  = float(np.sum(sig ** 2))
 
         if orig_energy <= 1e-12:
             return residual.reshape(1, -1)
 
         for _ in range(self.K_max):
             vmd  = VMD(alpha=self.alpha, K=1, tol=1e-7, max_iter=self.max_iter)
-            mode = vmd.decompose(residual)[0]
+            mode = vmd.decompose(residual)
 
-            modes.append(mode)
-            residual = residual - mode
+            # mode has shape (1, N_out); N_out may differ from len(sig) by 1
+            # due to even-length enforcement in VMD — align lengths
+            mode_1d = mode[0]
+            n_out   = mode_1d.shape[0]
+            n_sig   = len(residual)
 
-            # Stop when residual energy is less than tol fraction of original
-            if orig_energy > 0 and np.sum(residual ** 2) / orig_energy < self.tol:
+            if n_out != n_sig:
+                # Trim or zero-pad to match residual length
+                if n_out > n_sig:
+                    mode_1d = mode_1d[:n_sig]
+                else:
+                    mode_1d = np.pad(mode_1d, (0, n_sig - n_out))
+
+            modes.append(mode_1d)
+            residual = residual - mode_1d
+
+            # Early stopping: residual energy below threshold
+            res_energy = float(np.sum(residual ** 2))
+            if res_energy / orig_energy < self.tol:
                 break
 
         if np.sum(np.abs(residual)) > 1e-10:
             modes.append(residual)
 
         return np.array(modes)
+
+    def reconstruct(self, modes: np.ndarray) -> np.ndarray:
+        return np.sum(modes, axis=0)
