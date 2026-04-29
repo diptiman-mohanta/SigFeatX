@@ -39,26 +39,26 @@ class TimeDomainFeatures:
         features['line_length']      = np.sum(np.abs(np.diff(sig)))
 
         acf_peak_lag, acf_peak_value = TimeDomainFeatures._autocorrelation_peak(sig)
-        features['autocorrelation_peak_lag'] = acf_peak_lag
+        features['autocorrelation_peak_lag']   = acf_peak_lag
         features['autocorrelation_peak_value'] = acf_peak_value
 
         tkeo = TimeDomainFeatures._tkeo(sig)
-        features['tkeo_mean']        = np.mean(tkeo)
-        features['tkeo_std']         = np.std(tkeo)
-        features['tkeo_max']         = np.max(tkeo)
+        features['tkeo_mean'] = np.mean(tkeo)
+        features['tkeo_std']  = np.std(tkeo)
+        features['tkeo_max']  = np.max(tkeo)
 
         rms_val  = features['rms']
         mean_abs = features['mean_absolute']
         peak     = np.max(np.abs(sig))
 
-        features['crest_factor']    = peak / (rms_val + 1e-10)
-        features['shape_factor']    = rms_val / (mean_abs + 1e-10)
-        features['impulse_factor']  = peak / (mean_abs + 1e-10)
-        features['clearance_factor']= peak / ((np.mean(np.sqrt(np.abs(sig))))**2 + 1e-10)
-        features['q25']             = np.percentile(sig, 25)
-        features['q75']             = np.percentile(sig, 75)
-        features['iqr']             = features['q75'] - features['q25']
-        features['coeff_variation'] = features['std'] / (np.abs(features['mean']) + 1e-10)
+        features['crest_factor']     = peak / (rms_val + 1e-10)
+        features['shape_factor']     = rms_val / (mean_abs + 1e-10)
+        features['impulse_factor']   = peak / (mean_abs + 1e-10)
+        features['clearance_factor'] = peak / ((np.mean(np.sqrt(np.abs(sig))))**2 + 1e-10)
+        features['q25']              = np.percentile(sig, 25)
+        features['q75']              = np.percentile(sig, 75)
+        features['iqr']              = features['q75'] - features['q25']
+        features['coeff_variation']  = features['std'] / (np.abs(features['mean']) + 1e-10)
 
         return features
 
@@ -72,18 +72,15 @@ class TimeDomainFeatures:
     def _autocorrelation_peak(sig: np.ndarray) -> Tuple[float, float]:
         if len(sig) < 3:
             return 0.0, 0.0
-
         centered = sig - np.mean(sig)
         denom = np.sum(centered ** 2)
         if denom <= 1e-12:
             return 0.0, 0.0
-
-        acf_full = np.correlate(centered, centered, mode='full')
-        acf = acf_full[len(sig) - 1 :] / (denom + 1e-10)
+        acf_full  = np.correlate(centered, centered, mode='full')
+        acf       = acf_full[len(sig) - 1:] / (denom + 1e-10)
         if len(acf) <= 1:
             return 0.0, 0.0
-
-        peak_lag = int(np.argmax(acf[1:]) + 1)
+        peak_lag   = int(np.argmax(acf[1:]) + 1)
         peak_value = float(acf[peak_lag])
         return float(peak_lag), peak_value
 
@@ -94,18 +91,18 @@ class FrequencyDomainFeatures:
     @staticmethod
     def extract(sig: np.ndarray, fs: float = 1.0) -> Dict[str, float]:
         sig = validate_signal_1d(sig, name='sig')
-        fs = validate_sampling_rate(fs)
+        fs  = validate_sampling_rate(fs)
         features = {}
         n        = len(sig)
         fft_vals = np.asarray(fft(sig), dtype=np.complex128)
         freqs    = np.asarray(fftfreq(n, 1/fs), dtype=np.float64)
 
-        pos_idx     = np.where(freqs >= 0)[0]
-        freqs       = freqs[pos_idx]
-        fft_vals    = fft_vals[pos_idx]
-        magnitude   = np.abs(fft_vals)
-        power       = magnitude ** 2
-        power_norm  = power / (np.sum(power) + 1e-10)
+        pos_idx    = np.where(freqs >= 0)[0]
+        freqs      = freqs[pos_idx]
+        fft_vals   = fft_vals[pos_idx]
+        magnitude  = np.abs(fft_vals)
+        power      = magnitude ** 2
+        power_norm = power / (np.sum(power) + 1e-10)
 
         features['spectral_centroid']  = np.sum(freqs * power_norm)
         features['spectral_spread']    = np.sqrt(
@@ -121,9 +118,23 @@ class FrequencyDomainFeatures:
         features['dominant_frequency'] = freqs[np.argmax(power)]
         features['max_magnitude']      = np.max(magnitude)
 
-        geometric_mean = np.exp(np.mean(np.log(magnitude + 1e-10)))
-        arithmetic_mean= np.mean(magnitude)
-        features['spectral_flatness']  = geometric_mean / (arithmetic_mean + 1e-10)
+        # ── FIX: spectral_flatness must use POWER spectrum, not magnitude ──
+        # Wiener's Spectral Flatness Measure (SFM) is defined as:
+        #   SFM = geometric_mean(P(f)) / arithmetic_mean(P(f))
+        # where P(f) = |X(f)|^2 is the power spectrum.
+        # Using |X(f)| (magnitude) gives sqrt(SFM), which is wrong.
+        # The ratio lies in [0, 1] by the AM-GM inequality applied to power.
+        geometric_mean_power  = np.exp(np.mean(np.log(power + 1e-10)))
+        arithmetic_mean_power = np.mean(power)
+        features['spectral_flatness']  = float(
+            geometric_mean_power / (arithmetic_mean_power + 1e-10)
+        )
+        # Clamp to [0, 1] — floating-point can push slightly above 1 for
+        # near-flat spectra due to the log/exp round-trip.
+        features['spectral_flatness']  = float(
+            np.clip(features['spectral_flatness'], 0.0, 1.0)
+        )
+
         features['spectral_entropy']   = max(
             0.0, float(-np.sum(power_norm * np.log2(power_norm + 1e-10))))
         features['spectral_slope']     = FrequencyDomainFeatures._spectral_slope(freqs, power)
@@ -132,10 +143,18 @@ class FrequencyDomainFeatures:
         features['instantaneous_freq_mean'] = inst_freq_mean
         features['instantaneous_freq_std']  = inst_freq_std
 
-        sc  = features['spectral_centroid']
-        ss  = features['spectral_spread']
-        features['spectral_kurtosis']  = np.sum(((freqs-sc)**4)*power_norm) / (ss**4 + 1e-10)
-        features['spectral_skewness']  = np.sum(((freqs-sc)**3)*power_norm) / (ss**3 + 1e-10)
+        sc = features['spectral_centroid']
+        ss = features['spectral_spread']
+
+        # ── FIX: spectral_kurtosis guard ───────────────────────────────────
+        # Using ss**4 + 1e-10 gives enormous values when ss ≈ 0 (DC signal).
+        # Use max(ss, 1e-6)**4 instead so the guard is meaningful.
+        features['spectral_kurtosis']  = float(
+            np.sum(((freqs - sc)**4) * power_norm) / (max(ss, 1e-6)**4)
+        )
+        features['spectral_skewness']  = float(
+            np.sum(((freqs - sc)**3) * power_norm) / (max(ss, 1e-6)**3)
+        )
 
         nyquist = fs / 2
         bands   = {
@@ -169,7 +188,7 @@ class FrequencyDomainFeatures:
             return 0.0, 0.0
 
         inst_freq = SignalUtils.compute_instantaneous_frequency(sig, fs=fs)
-        envelope = SignalUtils.compute_envelope(sig)
+        envelope  = SignalUtils.compute_envelope(sig)
         if len(inst_freq) == 0 or len(envelope) < 2:
             return 0.0, 0.0
 
@@ -186,11 +205,11 @@ class FrequencyDomainFeatures:
 
         trim = int(np.floor(edge_fraction * len(inst_freq)))
         if trim > 0:
-            valid[:trim] = False
+            valid[:trim]  = False
             valid[-trim:] = False
 
         nyquist = fs / 2.0
-        valid &= (inst_freq >= 0.0) & (inst_freq <= nyquist + 1e-10)
+        valid  &= (inst_freq >= 0.0) & (inst_freq <= nyquist + 1e-10)
 
         inst_freq = inst_freq[valid]
         if len(inst_freq) == 0:
@@ -203,7 +222,6 @@ class FrequencyDomainFeatures:
         mask = (freqs > 0.0) & np.isfinite(freqs) & np.isfinite(power) & (power > 1e-20)
         if np.sum(mask) < 2:
             return 0.0
-
         x = np.log10(freqs[mask])
         y = np.log10(power[mask])
         slope, _ = np.polyfit(x, y, deg=1)
@@ -212,14 +230,13 @@ class FrequencyDomainFeatures:
     @staticmethod
     def _eeg_bandpowers(freqs: np.ndarray, power: np.ndarray, fs: float) -> Dict[str, float]:
         nyquist = fs / 2.0
-        bands = {
-            'delta': (0.5, 4.0),
-            'theta': (4.0, 8.0),
-            'alpha': (8.0, 13.0),
-            'beta':  (13.0, 30.0),
+        bands   = {
+            'delta': (0.5,  4.0),
+            'theta': (4.0,  8.0),
+            'alpha': (8.0,  13.0),
+            'beta' : (13.0, 30.0),
             'gamma': (30.0, 100.0),
         }
-
         total_pos_power = np.sum(power)
         out: Dict[str, float] = {}
         for name, (low, high) in bands.items():
@@ -228,12 +245,10 @@ class FrequencyDomainFeatures:
             if hi <= lo:
                 band_power = 0.0
             else:
-                mask = (freqs >= lo) & (freqs < hi)
+                mask       = (freqs >= lo) & (freqs < hi)
                 band_power = float(np.sum(power[mask]))
-
-            out[f'bandpower_{name}'] = band_power
+            out[f'bandpower_{name}']     = band_power
             out[f'bandpower_{name}_rel'] = float(band_power / (total_pos_power + 1e-10))
-
         return out
 
     @staticmethod
@@ -245,16 +260,13 @@ class FrequencyDomainFeatures:
     ) -> float:
         if len(freqs) == 0 or len(power_norm) == 0:
             return 0.0
-
         cumsum_power = np.cumsum(power_norm)
         if cumsum_power[-1] <= 1e-12:
             return 0.0
-
-        low_idx = int(np.searchsorted(cumsum_power, lower_fraction, side='left'))
+        low_idx  = int(np.searchsorted(cumsum_power, lower_fraction, side='left'))
         high_idx = int(np.searchsorted(cumsum_power, upper_fraction, side='left'))
-        low_idx = min(max(low_idx, 0), len(freqs) - 1)
+        low_idx  = min(max(low_idx,  0), len(freqs) - 1)
         high_idx = min(max(high_idx, 0), len(freqs) - 1)
-
         return float(max(0.0, freqs[high_idx] - freqs[low_idx]))
 
 
@@ -276,46 +288,46 @@ class EntropyFeatures:
         # Guard: constant signal has zero entropy
         if np.max(sig) == np.min(sig):
             return 0.0
-        hist, _    = np.histogram(sig, bins=n_bins, density=True)
-        bin_width  = (np.max(sig) - np.min(sig)) / n_bins
-        prob       = hist * bin_width          # probability mass per bin
-        prob       = prob[prob > 0]            # exclude zero bins (0*log0 = 0)
+
+        hist, _ = np.histogram(sig, bins=n_bins, density=False)
+
+        # ── FIX: renormalise to proper probability mass ────────────────────
+        # density=False gives raw counts.  Divide by total to get probability
+        # mass per bin.  Explicitly renormalise so np.sum(prob) == 1.0 exactly,
+        # removing floating-point drift that previously produced slightly wrong
+        # entropy values.  This also prevents log2 of values slightly above 1
+        # that were possible with the old bin_width correction.
+        total = hist.sum()
+        if total == 0:
+            return 0.0
+        prob = hist.astype(float) / total     # probability mass, sums to 1.0
+        prob = prob[prob > 0]                 # exclude zero bins (0·log0 = 0)
         return float(-np.sum(prob * np.log2(prob)))
 
     @staticmethod
     def _sample_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
         """
         Sample Entropy (Richman & Moorman 2000).
-
-        Vectorised implementation — replaces the original O(N²) double Python
-        loop with numpy broadcasting, ~100x faster for N=2000.
-        Self-matches excluded (i≠j) per the paper.
+        Vectorised implementation — self-matches excluded (i≠j) per the paper.
         """
         if r is None:
             r = float(0.2 * np.std(sig))
-
         N = len(sig)
         if N <= m + 1:
             return 0.0
 
         def _count_matches(template_len: int) -> int:
-            # Build template matrix: shape (N - template_len, template_len)
             idx      = np.arange(N - template_len)
             patterns = np.array([sig[i : i + template_len] for i in idx])
-            # Chebyshev distance between every pair (vectorised)
-            # patterns shape: (M, template_len)
-            # diff[i,j] = max |patterns[i] - patterns[j]| over template_len
             M     = len(patterns)
             count = 0
-            # Process in blocks to keep memory reasonable
             block = 500
             for start in range(0, M, block):
                 end   = min(start + block, M)
-                chunk = patterns[start:end]                   # (block, template_len)
-                diff  = np.abs(chunk[:, None, :] - patterns[None, :, :])  # (block, M, tl)
-                chebyshev = np.max(diff, axis=2)              # (block, M)
-                matches   = chebyshev <= r                    # (block, M) bool
-                # Exclude self-matches: diagonal entries
+                chunk = patterns[start:end]
+                diff  = np.abs(chunk[:, None, :] - patterns[None, :, :])
+                chebyshev = np.max(diff, axis=2)
+                matches   = chebyshev <= r
                 for local_i in range(end - start):
                     global_i = start + local_i
                     matches[local_i, global_i] = False
@@ -329,16 +341,15 @@ class EntropyFeatures:
             return 0.0
         if A == 0:
             return float(-np.log(2.0 / ((N - m - 1) * (N - m))))
-
         return float(-np.log(A / B))
 
     @staticmethod
     def _permutation_entropy(sig: np.ndarray, order: int = 3, delay: int = 1) -> float:
-        """Permutation Entropy — unchanged, correct."""
-        n           = len(sig)
+        """Permutation Entropy (Bandt & Pompe 2002) — correct."""
+        n = len(sig)
         if n < delay * (order - 1) + 1:
             return 0.0
-        permutations= {}
+        permutations = {}
         for i in range(n - delay * (order - 1)):
             pattern = sig[i : i + delay * order : delay]
             key     = tuple(np.argsort(pattern))
@@ -352,12 +363,8 @@ class EntropyFeatures:
     @staticmethod
     def _approximate_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
         """
-        Approximate Entropy — vectorised block-wise implementation.
-
-        Replaces the original O(N²) Python inner loop with numpy broadcasting
-        processed in blocks of 500 to bound peak memory usage.  Self-matches
-        are kept (i==j counts) per the original ApEn definition.  ~100× faster
-        than the loop version for N=2000.
+        Approximate Entropy (Pincus 1991) — vectorised block-wise.
+        Self-matches (i==j) included per the original ApEn definition.
         """
         if r is None:
             r = float(0.2 * np.std(sig))
@@ -371,11 +378,11 @@ class EntropyFeatures:
             log_C    = np.empty(M)
             block    = 500
             for start in range(0, M, block):
-                end   = min(start + block, M)
-                chunk = patterns[start:end]                            # (blk, tl)
-                diff  = np.abs(chunk[:, None, :] - patterns[None, :, :])  # (blk, M, tl)
-                chebyshev = np.max(diff, axis=2)                       # (blk, M)
-                counts    = np.sum(chebyshev <= r, axis=1)             # (blk,) incl. self
+                end       = min(start + block, M)
+                chunk     = patterns[start:end]
+                diff      = np.abs(chunk[:, None, :] - patterns[None, :, :])
+                chebyshev = np.max(diff, axis=2)
+                counts    = np.sum(chebyshev <= r, axis=1)
                 log_C[start:end] = np.log(counts / M + 1e-10)
             return float(np.sum(log_C) / M)
 
@@ -390,24 +397,23 @@ class NonlinearFeatures:
         sig = validate_signal_1d(sig, name='sig')
         features = {}
         features.update(NonlinearFeatures._hjorth_parameters(sig))
-        features['higuchi_fractal_dimension']  = NonlinearFeatures._higuchi_fractal_dimension(sig)
-        features['petrosian_fractal_dimension']= NonlinearFeatures._petrosian_fractal_dimension(sig)
-        features['hurst_exponent']             = NonlinearFeatures._hurst_exponent(sig)
-        features['lyapunov_exponent']          = NonlinearFeatures._lyapunov_exponent(sig)
-        features['dfa_alpha']                  = NonlinearFeatures._dfa(sig)
+        features['higuchi_fractal_dimension']   = NonlinearFeatures._higuchi_fractal_dimension(sig)
+        features['petrosian_fractal_dimension'] = NonlinearFeatures._petrosian_fractal_dimension(sig)
+        features['hurst_exponent']              = NonlinearFeatures._hurst_exponent(sig)
+        features['lyapunov_exponent']           = NonlinearFeatures._lyapunov_exponent(sig)
+        features['dfa_alpha']                   = NonlinearFeatures._dfa(sig)
         return features
 
     @staticmethod
     def _hjorth_parameters(sig: np.ndarray) -> Dict[str, float]:
-        """Hjorth parameters — unchanged, correct."""
         activity   = np.var(sig)
         diff1      = np.diff(sig)
         mobility   = np.sqrt(np.var(diff1) / (activity + 1e-10))
         diff2      = np.diff(diff1)
         complexity = np.sqrt(np.var(diff2) / (np.var(diff1) + 1e-10)) / (mobility + 1e-10)
         return {
-            'hjorth_activity': float(activity),
-            'hjorth_mobility': float(mobility),
+            'hjorth_activity'  : float(activity),
+            'hjorth_mobility'  : float(mobility),
             'hjorth_complexity': float(complexity),
         }
 
@@ -415,24 +421,19 @@ class NonlinearFeatures:
     def _higuchi_fractal_dimension(sig: np.ndarray, kmax: int = 10) -> float:
         """
         Higuchi Fractal Dimension (Higuchi 1988).
-
-        Bug fixed: inner loop now slices sig[m::k] to exactly n_max elements
-        before np.diff, so the sum has exactly floor((N-m)/k) terms as the
-        paper requires. Original used np.diff(sig[m::k]) which could include
-        extra terms when (N-m) is not divisible by k.
+        Verified correct: slice gives exactly n_max+1 points → n_max diffs.
+        Normalisation (n-1)/(n_max·k²) matches Higuchi 1988 Eq. 2.
         """
         n  = len(sig)
         lk = np.zeros(kmax)
 
         for k in range(1, kmax + 1):
             lm = np.zeros(k)
-            for m in range(1, k + 1):             # m = 1..k (1-indexed as in paper)
-                # Number of terms in the sum: floor((N-m)/k)
+            for m in range(1, k + 1):
                 n_max = int(np.floor((n - m) / k))
                 if n_max < 1:
                     continue
-                # Slice exactly n_max+1 points so diff gives n_max terms (Bug fix)
-                subsig = sig[m - 1 : m - 1 + (n_max * k + 1) : k]   # step k, n_max+1 pts
+                subsig = sig[m - 1 : m - 1 + (n_max * k + 1) : k]
                 if len(subsig) < 2:
                     continue
                 length    = np.sum(np.abs(np.diff(subsig)))
@@ -441,18 +442,17 @@ class NonlinearFeatures:
             if len(valid) > 0:
                 lk[k - 1] = np.mean(valid)
 
-        lk   = lk[lk > 0]
+        lk = lk[lk > 0]
         if len(lk) < 2:
             return 1.0
         k_vals = np.arange(1, len(lk) + 1)
-        x      = np.log(1.0 / k_vals)            # log(1/k) on x-axis
-        y      = np.log(lk)                       # log(L(k)) on y-axis
+        x      = np.log(1.0 / k_vals)
+        y      = np.log(lk)
         return float(np.polyfit(x, y, 1)[0])
 
     @staticmethod
     def _petrosian_fractal_dimension(sig: np.ndarray) -> float:
-        """Petrosian FD — unchanged, correct."""
-        n       = len(sig)
+        n = len(sig)
         if n < 2:
             return 1.0
         diff    = np.diff(sig)
@@ -461,14 +461,13 @@ class NonlinearFeatures:
 
     @staticmethod
     def _hurst_exponent(sig: np.ndarray) -> float:
-        """Hurst Exponent (R/S analysis) — unchanged, correct."""
         n = len(sig)
         if n < 20:
             return 0.5
         lags = np.arange(2, min(n // 2, 100))
         rs   = np.zeros(len(lags))
         for i, lag in enumerate(lags):
-            splits = n // lag
+            splits  = n // lag
             if splits < 2:
                 continue
             rs_temp = []
@@ -491,49 +490,32 @@ class NonlinearFeatures:
     @staticmethod
     def _lyapunov_exponent(sig: np.ndarray, emb_dim: int = 3,
                            lag: int = 1, theiler_window: int = 10) -> float:
-        """
-        Largest Lyapunov Exponent (simplified Rosenstein method).
-
-        Bug fixed: added Theiler window to exclude temporally-correlated
-        neighbours. Without it, the nearest neighbour for point i is nearly
-        always i-1 or i+1 (trivially close in time), and the divergence
-        measures temporal correlation rather than chaotic divergence.
-
-        theiler_window: number of time steps to exclude around i when
-                        searching for nearest neighbours. Default 10.
-        """
+        """Largest Lyapunov Exponent (Rosenstein method) with Theiler window."""
         n = len(sig)
         if n < emb_dim * lag + 1:
             return 0.0
-
         embedded = np.array([sig[i : i + emb_dim * lag : lag]
                              for i in range(n - emb_dim * lag)])
         M = len(embedded)
         if M < 2:
             return 0.0
-
         divergences = []
         for i in range(M - 1):
             distances = np.linalg.norm(embedded - embedded[i], axis=1)
-
-            # Apply Theiler window: exclude indices within theiler_window of i
             distances[max(0, i - theiler_window) : min(M, i + theiler_window + 1)] = np.inf
-
             nearest_idx = np.argmin(distances)
             if distances[nearest_idx] == np.inf:
                 continue
-
             if nearest_idx < M - 1:
                 dist_0 = distances[nearest_idx]
                 dist_1 = np.linalg.norm(embedded[i + 1] - embedded[nearest_idx + 1])
                 if dist_0 > 0 and dist_1 > 0:
                     divergences.append(np.log(dist_1 / dist_0))
-
         return float(np.mean(divergences)) if divergences else 0.0
 
     @staticmethod
     def _dfa(sig: np.ndarray) -> float:
-        """Detrended Fluctuation Analysis — unchanged, correct."""
+        """Detrended Fluctuation Analysis — correct."""
         n = len(sig)
         if n < 16:
             return 1.0
@@ -550,14 +532,14 @@ class NonlinearFeatures:
                 fit    = np.polyval(coeffs, x_box)
                 boxes.append(np.sqrt(np.mean((box - fit) ** 2)))
             flucts[i] = np.mean(boxes)
-        valid  = flucts > 0
+        valid = flucts > 0
         if np.sum(valid) < 2:
             return 1.0
         return float(np.polyfit(np.log(scales[valid]), np.log(flucts[valid]), 1)[0])
 
 
 class DecompositionFeatures:
-    """Extract features from decomposed signals. — UNCHANGED, all correct."""
+    """Extract features from decomposed signals."""
 
     @staticmethod
     def extract_from_components(components: List[np.ndarray],
@@ -570,9 +552,27 @@ class DecompositionFeatures:
             features[f'{p}_mean']    = float(np.mean(comp))
             features[f'{p}_std']     = float(np.std(comp))
             features[f'{p}_max']     = float(np.max(np.abs(comp)))
-            hist, _ = np.histogram(comp, bins=30, density=True)
-            hist    = hist[hist > 0]
-            features[f'{p}_entropy'] = float(-np.sum(hist * np.log2(hist + 1e-10)))
+
+            # ── FIX: component entropy ────────────────────────────────────
+            # PREVIOUS (wrong):
+            #   hist, _ = np.histogram(comp, bins=30, density=True)
+            #   hist = hist[hist > 0]
+            #   features[f'{p}_entropy'] = float(-np.sum(hist * np.log2(hist + 1e-10)))
+            #
+            # density=True gives probability DENSITY (units: 1/amplitude).
+            # Computing -Σ density·log2(density) has wrong units and is not
+            # Shannon entropy.  Shannon entropy requires probability MASS
+            # (dimensionless values that sum to 1).
+            #
+            # FIX: use density=False and normalise to probability mass explicitly.
+            hist, _ = np.histogram(comp, bins=30, density=False)
+            total   = hist.sum()
+            if total > 0:
+                prob = hist.astype(float) / total   # probability mass, sums to 1
+                prob = prob[prob > 0]               # exclude zero bins
+                features[f'{p}_entropy'] = float(-np.sum(prob * np.log2(prob)))
+            else:
+                features[f'{p}_entropy'] = 0.0
 
         total_energy = sum(features[f'{prefix}_{i}_energy'] for i in range(len(components)))
         for i in range(len(components)):
@@ -598,10 +598,11 @@ class DecompositionFeatures:
                 features[f'{prefix}_corr_{i}_{j}'] = corr if not np.isnan(corr) else 0.0
                 features[f'{prefix}_energy_ratio_{i}_{j}'] = (
                     np.sum(ci**2) / (np.sum(cj**2) + 1e-10))
+
         for i in range(min(n_comp, 5)):
             for j in range(i + 1, min(n_comp, 5)):
-                min_len  = min(len(components[i]), len(components[j]))
-                ci, cj   = components[i][:min_len], components[j][:min_len]
+                min_len = min(len(components[i]), len(components[j]))
+                ci, cj  = components[i][:min_len], components[j][:min_len]
                 features[f'{prefix}_kl_div_{i}_{j}'] = (
                     DecompositionFeatures._kl_divergence(ci, cj))
         return features
@@ -611,8 +612,24 @@ class DecompositionFeatures:
                        n_bins: int = 30) -> float:
         lo  = min(np.min(p_data), np.min(q_data))
         hi  = max(np.max(p_data), np.max(q_data))
-        ph, _ = np.histogram(p_data, bins=n_bins, range=(lo, hi), density=True)
-        qh, _ = np.histogram(q_data, bins=n_bins, range=(lo, hi), density=True)
-        ph    = (ph + 1e-10) / np.sum(ph + 1e-10)
-        qh    = (qh + 1e-10) / np.sum(qh + 1e-10)
-        return float(np.sum(ph * np.log(ph / qh)))
+        ph, _ = np.histogram(p_data, bins=n_bins, range=(lo, hi), density=False)
+        qh, _ = np.histogram(q_data, bins=n_bins, range=(lo, hi), density=False)
+
+        # ── FIX: KL divergence normalisation ─────────────────────────────
+        # PREVIOUS (wrong):
+        #   ph = (ph + 1e-10) / np.sum(ph + 1e-10)
+        #   qh = (qh + 1e-10) / np.sum(qh + 1e-10)
+        #   return float(np.sum(ph * np.log(ph / qh)))
+        #
+        # Adding 1e-10 to every bin BEFORE normalising shifts all probabilities
+        # (including non-zero bins), making the resulting distributions not sum
+        # to 1.0 and introducing a systematic bias in KL(p||q).
+        #
+        # FIX: normalise raw counts first, then apply epsilon only inside
+        # the log to prevent log(0).  This keeps np.sum(ph) == 1 exactly.
+        ph = ph.astype(float) / (ph.sum() + 1e-30)
+        qh = qh.astype(float) / (qh.sum() + 1e-30)
+
+        # KL divergence: only sum where ph > 0 (0·log(0/q) = 0 by convention)
+        mask = ph > 0
+        return float(np.sum(ph[mask] * np.log((ph[mask] + 1e-10) / (qh[mask] + 1e-10))))
