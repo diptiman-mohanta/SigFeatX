@@ -2,20 +2,43 @@
 EFD — Empirical Fourier Decomposition
 Reference: Xu et al. (2021), Mechanical Systems and Signal Processing 161:107952
 
-Bugs fixed vs original:
+Bugs fixed vs original SigFeatX version:
 
-BUG 1 — Boundaries at spectrum PEAKS instead of MINIMA  [CRITICAL]
-  Paper: "the boundary between mode k and mode k+1 is placed at the local
-  minimum between the k-th and (k+1)-th peak of the Fourier magnitude spectrum"
-  Original: used peak positions directly as boundaries — splits each peak's
-  energy across two adjacent modes, corrupting reconstruction.
+BUG 1 — Boundaries at spectrum PEAKS instead of MINIMA  [CRITICAL, already fixed]
+  Paper: boundary between mode k and k+1 is placed at the local minimum between
+  the k-th and (k+1)-th peak of the Fourier magnitude spectrum.
+  Original: used peak positions directly as boundaries.
   Fix: find peaks first, then find the minimum between each consecutive pair.
 
-BUG 2 — Non-symmetric (non-zero-phase) filter  [MODERATE]
+BUG 2 — Non-symmetric (non-zero-phase) filter  [MODERATE, already fixed]
   Paper: EFD applies an ideal zero-phase brick-wall bandpass filter by masking
-  BOTH the positive AND negative frequency bands in the FFT, then IFFT.
-  Original: only masked positive frequencies, leaving negative half unmasked.
+  BOTH positive AND negative frequency bands in the FFT, then IFFT.
+  Original: only masked positive frequencies.
   Fix: apply mask symmetrically to ±freq bands.
+
+BUG 3 — Float while-loop boundary drift  [MINOR, FIXED IN THIS VERSION]
+  PREVIOUS:
+      while len(boundaries) < self.n_modes + 1:
+          last = boundaries[-1]
+          top  = float(np.max(freqs))
+          gap  = (top - last) / (self.n_modes + 1 - len(boundaries) + 1)
+          boundaries.append(last + gap)
+
+  Problem: repeated floating-point additions accumulate rounding error.
+  Combined with the set() deduplication step, this can produce duplicate
+  entries and leave the final boundary list shorter than n_modes+1, causing
+  some modes to cover zero bandwidth and return all-zeros silently.
+
+  FIX (this version):
+      Replace the while-loop with np.linspace which divides the remaining
+      range in one step with no accumulation error.
+
+      if len(boundaries) < self.n_modes + 1:
+          last  = boundaries[-1]
+          top   = float(np.max(freqs))
+          n_extra = self.n_modes + 1 - len(boundaries)
+          extra = np.linspace(last, top, n_extra + 1)[1:]  # exclude 'last'
+          boundaries.extend(extra.tolist())
 """
 
 import numpy as np
@@ -34,10 +57,10 @@ class EFD:
 
     Parameters
     ----------
-    n_modes   : number of modes (frequency bands) to extract.
-    peak_prominence : minimum prominence for a peak to be considered a mode boundary.
-                      Expressed as a fraction of the maximum spectral magnitude.
-                      Default 0.1 (peaks at least 10% of max).
+    n_modes          : number of modes (frequency bands) to extract.
+    peak_prominence  : minimum prominence for a peak to be considered.
+                       Expressed as a fraction of the maximum spectral magnitude.
+                       Default 0.1 (peaks at least 10% of max).
     """
 
     def __init__(self, n_modes: int = 5, peak_prominence: float = 0.1):
@@ -75,11 +98,10 @@ class EFD:
             pos_mag, height=min_prominence, prominence=min_prominence
         )
 
-        # ── Step 2: Find local minima BETWEEN consecutive peaks (Bug 1 fix) ─
-        # Paper: boundaries are at local minima between peaks, not at peaks.
+        # ── Step 2: Find local minima BETWEEN consecutive peaks ────────────
         boundaries = self._find_boundaries(pos_mag, pos_freq, peaks)
 
-        # ── Step 3: Apply zero-phase ideal bandpass per segment (Bug 2 fix) ─
+        # ── Step 3: Apply zero-phase ideal bandpass per segment ────────────
         modes = np.zeros((self.n_modes, N))
 
         for k in range(self.n_modes):
@@ -88,7 +110,6 @@ class EFD:
                 f_high = boundaries[k + 1]
 
                 # Zero-phase ideal filter: mask BOTH +freq and -freq bands
-                # so that ifft(masked_fft) is real and phase-preserving.
                 mask = np.zeros(N, dtype=complex)
                 for i, f in enumerate(freqs):
                     if f_low <= abs(f) < f_high:
@@ -108,7 +129,8 @@ class EFD:
           - the local minimum between each consecutive pair of peaks
           - max(freqs) (end)
 
-        If fewer peaks than needed, splits the remaining range uniformly.
+        If fewer peaks than needed, fills the remaining range with
+        np.linspace (FIX: replaces the while-loop float accumulation).
         """
         boundaries = [0.0]
 
@@ -116,24 +138,27 @@ class EFD:
         for i in range(min(len(peaks) - 1, self.n_modes - 1)):
             left  = peaks[i]
             right = peaks[i + 1]
-            # Find index of minimum magnitude in the valley between the two peaks
             valley_section = magnitude[left:right + 1]
             valley_idx     = left + int(np.argmin(valley_section))
             boundaries.append(float(freqs[valley_idx]))
 
-        # Fill up to n_modes+1 boundaries with uniform spacing if needed
-        while len(boundaries) < self.n_modes + 1:
-            last = boundaries[-1]
-            top  = float(np.max(freqs))
-            gap  = (top - last) / (self.n_modes + 1 - len(boundaries) + 1)
-            boundaries.append(last + gap)
+        # FIX: replace while-loop with linspace to avoid float accumulation
+        # that caused duplicate boundaries and silent zero-bandwidth modes.
+        if len(boundaries) < self.n_modes + 1:
+            last    = boundaries[-1]
+            top     = float(np.max(freqs))
+            n_extra = self.n_modes + 1 - len(boundaries)
+            extra   = np.linspace(last, top, n_extra + 1)[1:]   # exclude 'last'
+            boundaries.extend(extra.tolist())
 
         boundaries.append(float(np.max(freqs)))
 
-        # Deduplicate, sort, and trim/pad to exactly n_modes+1 values
+        # Deduplicate, sort, trim/pad to exactly n_modes+1 values
         boundaries = sorted(set(round(b, 8) for b in boundaries))
         if len(boundaries) > self.n_modes + 1:
             boundaries = boundaries[:self.n_modes + 1]
+
+        # Safety pad (should never be needed after linspace fix)
         while len(boundaries) < self.n_modes + 1:
             boundaries.append(float(np.max(freqs)))
 
