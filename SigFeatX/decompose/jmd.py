@@ -1,56 +1,33 @@
 """
 JMD — Jump Plus AM-FM Mode Decomposition
 Reference: Nazari, M., Korshøj, A. R., & Rehman, N. (2025).
-    Jump Plus AM-FM Mode Decomposition.
     IEEE Transactions on Signal Processing, 73, 1081-1093.
-    https://doi.org/10.1109/TSP.2025.3535822
     arXiv: 2407.07800
 
-Mathematical model:
-    f(t) = Σ_k u_k(t) + v(t) + n(t)
+Implementation aligned with the PySDKit JMD class
+(github.com/wwhenxuan/PySDKit) and the authors' MATLAB reference code.
 
-    where:
-      u_k(t) — AM-FM oscillatory modes (band-limited, like VMD)
-      v(t)   — piecewise-constant jump component
-      n(t)   — noise
-
-The joint variational problem is solved via ADMM:
-
-  Oscillatory modes (identical to VMD update):
-      û_k^{n+1}(ω) = [f̂(ω) - Σ_{i≠k} û_i(ω) - v̂(ω) + λ̂(ω)/2]
-                      / [1 + 2α(ω - ω_k)²]
-
-  Centre-frequency update (identical to VMD):
-      ω_k^{n+1} = ∫₀^∞ ω|û_k(ω)|² dω / ∫₀^∞ |û_k(ω)|² dω
-
-  Jump component (minimax-concave penalty on first derivative):
-      v^{n+1} = (γD^T D + 2I)^{-1} [D^T ρ + γD^T x + 2(f - Σ_k u_k) - λ]
-
-  Auxiliary variable (element-wise proximal step):
-      x_j^{n+1} = prox_{β/γ · ϕ}(Dv + ρ/γ)_j
-
-  Lagrangian multiplier updates:
-      λ^{n+1} = λ + τ₁ (f̂ - v̂ - Σ_k û_k)
-      ρ^{n+1} = ρ  + τ₂ (Dv - x)
-
-Key difference from VMD: the jump component v is explicitly extracted
-alongside the oscillatory modes, preventing jumps from contaminating the
-AM-FM modes with spurious high-frequency artefacts.
-
-Note on the MC penalty proximal operator:
-    The minimax-concave (MC) penalty's proximal step for a scalar z:
-        prox(z) = sign(z) * max(|z| - 1/(γ b), 0)  if |z| < √(2/b)
-                = z                                  otherwise
-    For b→0 this reduces to the soft-threshold (L1/LASSO).
-    For b→∞ it approaches hard thresholding (L0).
+Key design decisions from the reference:
+  1. Mirror extension: same as VMD — prepend/append flipped halves.
+  2. Increasing alpha schedule: alpha is NOT constant. The reference uses
+     a quadratic ramp phi(t) = (-a2/2)t² + sqrt(2*a2)*t up to the
+     inflection point, then 1 thereafter. alpha[n] = Alpha_param * phi[n].
+     This makes the bandwidth constraint tighten gradually each iteration,
+     improving convergence stability significantly.
+  3. ifftshift before ifft for reconstruction (same as VMD reference).
+  4. MC proximal operator matches the reference's _max/_min clipping:
+       x = clip(clip(1/(1-mu*b) - mu*sqrt(2b)/((1-mu*b)*|h|), 0, None), None, 1) * h
+  5. v update: linalg.solve (dense). D is a T×T forward-difference matrix
+     with zero last row (NOT scipy sparse, matching the MATLAB reference).
+  6. Lagrangian update for rho: rho = rho - gamma*(x - Dv)
+     (subtraction, not addition — matches the MATLAB sign convention).
+  7. v mean-correction after each update to prevent DC drift.
+  8. De-mirroring: same as VMD — keep u[:, T//4 : 3*T//4].
 """
 
-import warnings
 import numpy as np
-from scipy.fft import fft, ifft, fftfreq
-from scipy.sparse import diags as sp_diags
-from scipy.sparse.linalg import spsolve
-from typing import List, Optional, Tuple
+from numpy import linalg
+from typing import Tuple, Union, Optional
 
 from SigFeatX._validation import validate_signal_1d
 
@@ -59,61 +36,28 @@ class JMD:
     """
     Jump Plus AM-FM Mode Decomposition (Nazari et al. 2025).
 
-    Jointly extracts K band-limited AM-FM oscillatory modes AND a
-    piecewise-constant jump component from a nonstationary signal, using
-    an ADMM-based variational optimization.
-
-    This is the key advantage over VMD: when a signal contains sudden
-    discontinuities (step changes, spikes, geomagnetic jerks, ECG artefacts),
-    VMD smears the jump energy across all modes.  JMD explicitly separates
-    the jump, yielding cleaner oscillatory modes.
-
     Parameters
     ----------
-    K : int
-        Number of AM-FM oscillatory modes.  Default 3.
-    alpha : float
-        Bandwidth constraint (same role as in VMD).  Larger = narrower modes.
-        Typical range: 100–5000.  Default 2000.
-    beta : float
-        Weight of the jump regularisation term.  Larger = stronger jump
-        suppression in the oscillatory modes.  Default 0.5.
-    b : float
-        Non-convexity parameter of the minimax-concave (MC) penalty.
-        b→0 → L1 (soft threshold); b→∞ → L0 (hard threshold).
-        Default 1.0 (moderately non-convex).
-    tau1 : float
-        Dual-ascent step for the oscillatory Lagrangian multiplier λ.
-        0 = noise-tolerant mode.  Default 0.0.
-    tau2 : float
-        Dual-ascent step for the jump auxiliary Lagrangian multiplier ρ.
-        Default 0.1.
-    gamma : float
-        ADMM penalty scalar for the jump sub-problem.  Default 1.0.
-    init : int
-        Centre-frequency initialisation: 0=zeros, 1=uniform, 2=random.
-        Default 1.
-    tol : float
-        Convergence tolerance.  Default 1e-7.
-    max_iter : int
-        Maximum ADMM iterations.  Default 500.
-    DC : bool
-        If True, force the first mode to zero frequency.  Default False.
+    K        : number of AM-FM oscillatory modes.
+    alpha    : bandwidth constraint (balancing parameter). Default 5000.
+    init     : centre-frequency init: 'zero', 'uniform', 'random'. Default 'zero'.
+    tol      : convergence tolerance. Default 1e-6.
+    beta     : jump regularisation (≈ 1/expected_jumps). Default 0.03.
+    b_bar    : MC-penalty shape parameter. Default 0.45.
+    tau      : dual-ascent step for Lagrangian λ. Default 5.
+    max_iter : maximum ADMM iterations. Default 2000.
     """
 
     def __init__(
         self,
-        K: int = 3,
-        alpha: float = 2000.0,
-        beta: float = 0.5,
-        b: float = 1.0,
-        tau1: float = 0.0,
-        tau2: float = 0.1,
-        gamma: float = 1.0,
-        init: int = 1,
-        tol: float = 1e-7,
-        max_iter: int = 500,
-        DC: bool = False,
+        K: int,
+        alpha: float = 5000.0,
+        init: str = 'zero',
+        tol: float = 1e-6,
+        beta: float = 0.03,
+        b_bar: float = 0.45,
+        tau: float = 5.0,
+        max_iter: int = 2000,
     ):
         if K < 1:
             raise ValueError(f"K must be >= 1; got {K}.")
@@ -121,28 +65,23 @@ class JMD:
             raise ValueError(f"alpha must be > 0; got {alpha}.")
         if beta < 0:
             raise ValueError(f"beta must be >= 0; got {beta}.")
-        if b <= 0:
-            raise ValueError(f"b must be > 0; got {b}.")
-        if gamma <= 0:
-            raise ValueError(f"gamma must be > 0; got {gamma}.")
+        if b_bar <= 0:
+            raise ValueError(f"b_bar must be > 0; got {b_bar}.")
+        if init not in ('zero', 'uniform', 'random'):
+            raise ValueError(f"init must be 'zero', 'uniform', or 'random'; got {init!r}.")
         if tol <= 0:
             raise ValueError(f"tol must be > 0; got {tol}.")
         if max_iter < 1:
             raise ValueError(f"max_iter must be >= 1; got {max_iter}.")
-        if init not in (0, 1, 2):
-            raise ValueError(f"init must be 0, 1, or 2; got {init}.")
 
         self.K        = K
         self.alpha    = alpha
-        self.beta     = beta
-        self.b        = b
-        self.tau1     = tau1
-        self.tau2     = tau2
-        self.gamma    = gamma
         self.init     = init
         self.tol      = tol
+        self.beta     = beta
+        self.b_bar    = b_bar
+        self.tau      = tau
         self.max_iter = max_iter
-        self.DC       = DC
 
     # ------------------------------------------------------------------
     # Public API
@@ -155,100 +94,185 @@ class JMD:
         Returns
         -------
         modes : np.ndarray of shape (K, N)
-            Oscillatory AM-FM modes (time domain), one row per mode.
-        jump : np.ndarray of shape (N,)
-            Piecewise-constant jump component.
+        jump  : np.ndarray of shape (N,)
 
-        Notes
-        -----
-        To reconstruct the signal: modes.sum(axis=0) + jump ≈ sig
-        (residual noise is not recovered by design).
+        Reconstruction: modes.sum(axis=0) + jump ≈ sig
+        """
+        u, v, _ = self.fit_transform(sig, return_all=True)
+        return u, v
+
+    def fit_transform(
+        self,
+        sig: np.ndarray,
+        return_all: bool = True,
+    ) -> Union[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
+        """
+        Decompose signal.
+
+        Parameters
+        ----------
+        sig        : 1-D input signal
+        return_all : if True return (modes, jump, omega);
+                     if False return modes only.
         """
         sig = validate_signal_1d(sig, name='sig')
-        N   = len(sig)
 
-        # ── Fourier domain setup ──────────────────────────────────────────
-        f_hat = fft(sig)
-        omega = fftfreq(N)                     # normalised frequencies [-0.5, 0.5)
+        # DC shift (reference saves shift and adds it back to v)
+        shift = float(np.mean(sig))
 
-        pos   = omega >= 0
-        # Analytic spectrum (one-sided × 2) — same as VMD
-        f_hat_p              = np.zeros(N, dtype=complex)
-        f_hat_p[pos]         = 2.0 * f_hat[pos]
+        # Period / sampling frequency
+        save_T = len(sig)
+        fs     = 1.0 / save_T
 
-        # ── Initialise centre frequencies ─────────────────────────────────
-        omega_k = self._init_omegas()
+        # ── Mirror extension ───────────────────────────────────────────
+        f = self._enc_fmirror(sig, save_T)
+        T = len(f)                              # = 2 * save_T
+        half_T = T // 2
+        t = np.arange(1, T + 1) / T
+        freqs = t - 0.5 - 1.0 / T             # centred frequency axis
 
-        # ── ADMM state variables ──────────────────────────────────────────
-        u_hat_k   = np.zeros((self.K, N), dtype=complex)  # mode spectra
-        lambda_   = np.zeros(N, dtype=complex)             # Lagrangian for modes
-        v         = np.zeros(N)                            # jump component (time)
-        x         = np.zeros(N - 1)                        # auxiliary = D*v
-        rho       = np.zeros(N - 1)                        # Lagrangian for jump
+        # ── Increasing alpha schedule ──────────────────────────────────
+        # Reference: phi ramps from 0 up to 1, then stays at 1.
+        # alpha[n] = Alpha_param * phi[n]
+        a2   = 50
+        t2   = np.arange(0.01, np.sqrt(2.0 / a2) + 0.001, 0.001)
+        phi1 = (-a2 / 2.0) * t2 ** 2 + np.sqrt(2.0 * a2) * t2
+        if self.max_iter > phi1.shape[0]:
+            phi = np.concatenate([phi1, np.ones(self.max_iter - phi1.shape[0])])
+        else:
+            phi = phi1.copy()
+        Alpha = self.alpha * phi               # shape (max_iter,)
 
-        # ── Sparse first-difference matrix D of shape (N-1, N) ───────────
-        # D v = v[1:] - v[:-1]  (forward differences)
-        D, DtD, DtD_mat = self._build_diff_matrices(N)
+        # ── Analytic (positive-only) spectrum ──────────────────────────
+        f_hat      = np.fft.fftshift(np.fft.fft(f))
+        f_hat_plus = f_hat.copy()
+        f_hat_plus[:half_T] = 0
 
-        # ── ADMM main loop ────────────────────────────────────────────────
-        for iteration in range(self.max_iter):
-            u_hat_prev = u_hat_k.copy()
+        # ── Mode spectrum storage ──────────────────────────────────────
+        u_hat_plus = np.zeros((self.max_iter, T, self.K), dtype=complex)
 
-            # -- Step 1: Update oscillatory modes and centre frequencies ---
+        # ── Centre frequency initialisation ───────────────────────────
+        omega_plus = self._init_omega(fs)
+
+        # ── Jump component initialisation ──────────────────────────────
+        b, v, x, D, DTD, SPDiag, j_hat_plus, rho, coef1, mu, gamma = \
+            self._init_jump(freqs, T)
+
+        # ── ADMM loop ──────────────────────────────────────────────────
+        u_diff = self.tol + np.spacing(1)
+        n      = 0
+        sum_uk = 0
+
+        while u_diff > self.tol and n < self.max_iter - 1:
+
+            # Mode updates (same as VMD with scheduled Alpha)
+            k      = 0
+            sum_uk = (u_hat_plus[n, :, self.K - 1]
+                      + sum_uk
+                      - u_hat_plus[n, :, 0])
+
             for k in range(self.K):
-                sum_others = np.sum(u_hat_k, axis=0) - u_hat_k[k]
-                v_hat      = fft(v)
+                if k > 0:
+                    sum_uk = (u_hat_plus[n + 1, :, k - 1]
+                              + sum_uk
+                              - u_hat_plus[n, :, k])
 
-                denom       = 1.0 + 2.0 * self.alpha * (omega - omega_k[k]) ** 2
-                u_hat_k[k]  = (
-                    f_hat_p - sum_others - v_hat + lambda_ / 2.0
-                ) / denom
+                u_hat_plus[n + 1, :, k] = (
+                    (f_hat_plus - sum_uk - j_hat_plus[n, :])
+                    / (1.0 + Alpha[n] * (freqs - omega_plus[n, k]) ** 2)
+                )
 
-                if self.DC and k == 0:
-                    u_hat_k[0][omega != 0] = 0.0
+                pos_u = np.abs(u_hat_plus[n + 1, half_T:T, k]) ** 2
+                omega_plus[n + 1, k] = (
+                    np.dot(freqs[half_T:T], pos_u)
+                    / (np.sum(pos_u) + 1e-10)
+                )
 
-                power      = np.abs(u_hat_k[k][pos]) ** 2
-                omega_k[k] = np.dot(omega[pos], power) / (np.sum(power) + 1e-10)
+            # Back to time domain for v update
+            u_hat_td = np.zeros((T, self.K), dtype=complex)
+            for k in range(self.K):
+                u_hat_td[half_T:T, k] = u_hat_plus[n + 1, half_T:T, k]
+                conj_v = np.conj(u_hat_plus[n + 1, half_T:T, k])[::-1]
+                u_hat_td[1: half_T + 1, k] = conj_v
+                u_hat_td[0, k] = np.conj(u_hat_td[-1, k])
 
-            # -- Step 2: Update jump component v ---------------------------
-            # v = (γ D^T D + 2I)^{-1} [D^T ρ + γ D^T x + 2(f - Σu_k) - λ_time]
-            u_sum_time    = np.sum(
-                [np.real(ifft(u_hat_k[k])) for k in range(self.K)], axis=0
-            )
-            lambda_time   = np.real(ifft(lambda_))
+            u_td = np.zeros((self.K, T))
+            for k in range(self.K):
+                u_td[k, :] = np.real(
+                    np.fft.ifft(np.fft.ifftshift(u_hat_td[:, k]))
+                )
+
+            # Jump component v update
             rhs = (
-                D.T.dot(rho)
-                + self.gamma * D.T.dot(x)
-                + 2.0 * (sig - u_sum_time)
-                - lambda_time
+                gamma * D.T.dot(x)
+                - D.T.dot(rho)
+                + f
+                - np.sum(u_td, axis=0)
             )
-            lhs = self.gamma * DtD_mat + 2.0 * sp_diags(
-                np.ones(N), 0, shape=(N, N), format='csc')
-            v = spsolve(lhs, rhs)
+            lhs = SPDiag + gamma * DTD
+            v   = linalg.solve(lhs, rhs)
 
-            # -- Step 3: Update auxiliary variable x (MC proximal step) ----
+            # Auxiliary variable x update (MC proximal — reference formula)
             Dv = D.dot(v)
-            z  = Dv + rho / self.gamma
-            x  = self._mc_proximal(z, threshold=self.beta / self.gamma, b=self.b)
+            h  = Dv + coef1 * rho
 
-            # -- Step 4: Update Lagrangian multipliers ----------------------
-            v_hat     = fft(v)
-            lambda_  += self.tau1 * (f_hat_p - v_hat - np.sum(u_hat_k, axis=0))
-            rho      += self.tau2 * (Dv - x)
+            abs_h = np.abs(h)
+            # Avoid division by zero in the proximal computation
+            safe_abs_h = np.where(abs_h > 1e-10, abs_h, 1e-10)
 
-            # -- Convergence check ------------------------------------------
-            delta = np.sum(np.abs(u_hat_k - u_hat_prev) ** 2) / (
-                np.sum(np.abs(u_hat_prev) ** 2) + 1e-10
+            inner = (
+                (1.0 / (1.0 - mu * b)) * np.ones_like(abs_h)
+                - (mu * np.sqrt(2.0 * b) / (1.0 - mu * b)) / safe_abs_h
             )
-            if delta < self.tol:
-                break
+            inner_clamped = np.clip(inner, 0.0, None)   # max(·, 0)
+            x = np.clip(inner_clamped, None, 1.0) * h   # min(·, 1) × h
 
-        # ── Convert modes to time domain ──────────────────────────────────
-        modes = np.zeros((self.K, N))
+            # Dual update for rho (reference: subtract, not add)
+            rho = rho - gamma * (x - Dv)
+
+            # Mean-correction of v (prevents DC drift)
+            v = v - (np.mean(v) - np.mean(f))
+
+            # Jump to frequency domain
+            j_hat_plus[n + 1, :] = np.fft.fftshift(np.fft.fft(v))
+            j_hat_plus[n + 1, :half_T] = 0
+
+            n += 1
+
+            # Convergence check
+            u_diff = np.spacing(1)
+            for i in range(self.K):
+                d      = u_hat_plus[n, :, i] - u_hat_plus[n - 1, :, i]
+                u_diff += (1.0 / T) * np.real(np.dot(d, np.conj(d)))
+            d_j    = j_hat_plus[n, :] - j_hat_plus[n - 1, :]
+            u_diff += (1.0 / T) * np.real(np.dot(d_j, np.conj(d_j)))
+            u_diff  = np.abs(u_diff)
+
+        # ── Final reconstruction ───────────────────────────────────────
+        N_iter  = min(n, self.max_iter)
+        omega   = omega_plus[N_iter, :]
+
+        u_hat_final = np.zeros((T, self.K), dtype=complex)
         for k in range(self.K):
-            modes[k] = np.real(ifft(u_hat_k[k]))
+            u_hat_final[half_T:T, k] = u_hat_plus[N_iter, half_T:T, k]
+            conj_v = np.conj(u_hat_plus[N_iter, half_T:T, k])[::-1]
+            u_hat_final[1: half_T + 1, k] = conj_v
+            u_hat_final[0, k] = np.conj(u_hat_final[-1, k])
 
-        return modes, v
+        u_full = np.zeros((self.K, T))
+        for k in range(self.K):
+            u_full[k, :] = np.real(
+                np.fft.ifft(np.fft.ifftshift(u_hat_final[:, k]))
+            )
+
+        # De-mirror
+        pos = T // 4
+        u   = u_full[:, pos: 3 * pos]
+        v   = v[pos: 3 * pos] + shift
+
+        if return_all:
+            return u, v, omega
+        return u
 
     def reconstruct(self, modes: np.ndarray, jump: np.ndarray) -> np.ndarray:
         """Reconstruct signal from modes and jump component."""
@@ -258,52 +282,66 @@ class JMD:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _init_omegas(self) -> np.ndarray:
-        """Initialise centre frequencies (same as VMD)."""
-        if self.init == 0:
-            omega_k = np.zeros(self.K)
-        elif self.init == 1:
-            omega_k = np.arange(1, self.K + 1) / (2.0 * self.K)
-        else:
-            omega_k = np.sort(np.random.rand(self.K) * 0.5)
-        if self.DC:
-            omega_k[0] = 0.0
-        return omega_k
-
     @staticmethod
-    def _build_diff_matrices(N: int):
-        """
-        Build sparse first-difference matrix D ∈ R^{(N-1)×N} and D^T D.
-        D v  = v[1:] - v[:-1]
-        """
-        ones = np.ones(N)
-        D    = sp_diags([-ones[:-1], ones[:-1]], offsets=[0, 1],
-                        shape=(N - 1, N), format='csr')
-        DtD  = D.T.dot(D)
-        return D, DtD, DtD.tocsc()
+    def _enc_fmirror(sig: np.ndarray, T: int) -> np.ndarray:
+        """Mirror extension: flip(sig[:T//2]) + sig + flip(sig[T//2:])."""
+        return np.concatenate([
+            sig[:T // 2][::-1],
+            sig,
+            sig[T // 2:][::-1],
+        ])
 
-    @staticmethod
-    def _mc_proximal(z: np.ndarray, threshold: float, b: float) -> np.ndarray:
+    def _init_omega(self, fs: float) -> np.ndarray:
+        """Initialise centre-frequency matrix."""
+        omega = np.zeros((self.max_iter, self.K))
+        if self.init == 'zero':
+            pass   # already zeros
+        elif self.init == 'uniform':
+            for i in range(1, self.K + 1):
+                omega[0, i - 1] = (0.5 / self.K) * (i - 1)
+        elif self.init == 'random':
+            omega[0, :] = np.sort(
+                np.exp(
+                    np.log(fs) + (np.log(0.5) - np.log(fs)) * np.random.rand(self.K)
+                )
+            )
+        return omega
+
+    def _init_jump(self, freqs: np.ndarray, T: int):
         """
-        Element-wise proximal operator for the minimax-concave (MC) penalty
-        applied to the derivative of the jump component.
+        Initialise all jump-component variables.
 
-        For each z_j:
-            if |z_j| < sqrt(2/b):
-                prox = sign(z_j) * max(|z_j| - threshold, 0)   # soft-threshold
-            else:
-                prox = z_j                                        # pass through
-
-        This follows from the subdifferential of ϕ(|·|; b) in Eq. (6) of the
-        JMD paper.  As b → 0, reverts to pure L1 soft-thresholding.
-        As b → ∞, the threshold region collapses → hard thresholding.
+        Returns
+        -------
+        b, v, x, D, DTD, SPDiag, j_hat_plus, rho, coef1, mu, gamma
         """
-        abs_z    = np.abs(z)
-        boundary = np.sqrt(2.0 / (b + 1e-10))
+        # b from b_bar
+        b = 2.0 / (self.b_bar ** 2)
 
-        result   = np.where(
-            abs_z < boundary,
-            np.sign(z) * np.maximum(abs_z - threshold, 0.0),   # soft threshold
-            z,                                                    # pass through
-        )
-        return result
+        # gamma from tau and b (reference formula)
+        gamma = self.tau * (0.5 * b * self.beta)
+
+        # Jump signal (time domain)
+        v = np.zeros(T)
+
+        # First-difference matrix D: T×T, last row = 0
+        d = np.ones(T)
+        D = np.diag(-d, 0) + np.diag(d[:-1], 1)
+        D = D.astype(float)
+        D[-1, :] = 0.0               # zero boundary condition
+
+        DTD    = D.T.dot(D)
+        SPDiag = np.eye(T, dtype=float)
+
+        # Auxiliary variable and Lagrangian for jump
+        x   = np.zeros(T)
+        rho = np.zeros(T)
+
+        # Pre-computed scalars
+        coef1 = 1.0 / gamma
+        mu    = 2.0 * self.beta / gamma
+
+        # Jump spectrum storage
+        j_hat_plus = np.zeros((self.max_iter, len(freqs)), dtype=complex)
+
+        return b, v, x, D, DTD, SPDiag, j_hat_plus, rho, coef1, mu, gamma
