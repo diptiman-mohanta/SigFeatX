@@ -1,35 +1,36 @@
 """
 LMD — Local Mean Decomposition
-Reference: Smith, J.S. (2005). The local mean decomposition and its application to
-EEG perception data. Journal of the Royal Society Interface, 2(5), 443-454.
-https://doi.org/10.1098/rsif.2005.0058
+Reference: Smith, J.S. (2005), J. R. Soc. Interface 2(5):443-454.
 
-Algorithm:
-  1. Find all local extrema (maxima + minima) of the signal.
-  2. Compute the local mean m_i = (n_i + n_{i+1}) / 2 at each half-wave.
-  3. Compute the local envelope a_i = |n_i - n_{i+1}| / 2 at each half-wave.
-  4. Smooth both step-functions using a moving-average smoother to obtain
-     continuous m(t) and a(t).
-  5. Subtract the mean: h(t) = s(t) - m(t).
-  6. Divide by the envelope: s_new(t) = h(t) / a(t).
-  7. Repeat steps 1-6 on s_new until the envelope is flat (≈1 everywhere).
-  8. The Product Function is PF = a_final(t) * s_final(t).
-  9. Subtract PF from the signal; repeat the whole process on the residual.
+Implementation aligned with the well-established PySDKit LMD class
+(github.com/wwhenxuan/PySDKit) and PyLMD (github.com/shownlin/PyLMD).
 
-Improvements:
-  - Mirror-extension boundary condition (avoids endpoint effects that plague
-    the original moving-average approach).
-  - Cubic-spline smoothing option in addition to moving-average (matches the
-    intent of the original paper more closely for short windows).
-  - Flat-envelope stopping criterion uses both an absolute tolerance and a
-    relative-change criterion to avoid over-sifting.
-  - Constant and near-constant signals handled gracefully.
+Key design decisions from the reference:
+  1. min_extrema guard: stop extracting PFs when the residue has fewer than
+     min_extrema extreme points (default 5). Prevents decomposing noise tails.
+
+  2. local_mean_and_envelope: window = max(diff(extrema)) // 3.
+     This matches the reference exactly (max inter-extremum spacing / 3).
+
+  3. Envelope clamp: if any envelope value a[i] <= 0, set a[i] = 1 - 1e-4.
+     This prevents division by zero and negative-envelope artefacts.
+
+  4. is_smooth check in moving_average_smooth: stop smoothing iterations
+     when consecutive samples differ (i.e. the signal is already smooth).
+     Note: the reference's is_smooth returns False when any two consecutive
+     samples are EQUAL (indicating over-smoothing plateau), so we inherit
+     that logic unchanged.
+
+  5. Overflow guard: cumulative envelope product clamped to [1e-8, 1e8]
+     before each multiplication to prevent IEEE 754 overflow.
+
+  6. NaN/Inf guard in sifting loop: break immediately if demodulated
+     signal contains non-finite values.
 """
 
 import warnings
 import numpy as np
-from scipy import signal as scipy_signal
-from scipy.interpolate import CubicSpline
+from scipy.signal import argrelextrema
 from typing import List, Optional, Tuple
 
 from SigFeatX._validation import validate_signal_1d
@@ -39,63 +40,51 @@ class LMD:
     """
     Local Mean Decomposition (Smith 2005).
 
-    Decomposes a signal into a set of Product Functions (PFs), each of which
-    is the product of an envelope signal (instantaneous amplitude) and a
-    purely frequency-modulated (FM) signal. The instantaneous frequency can
-    be derived from each FM signal without using the Hilbert transform,
-    avoiding the negative-frequency artefacts that can affect EMD/HHT.
+    Decomposes a signal into Product Functions (PFs). Each PF is the
+    product of an instantaneous-amplitude envelope and a purely FM signal.
 
     Parameters
     ----------
-    max_pf : int
-        Maximum number of Product Functions to extract.  Default 8.
-    max_sift_iter : int
-        Maximum sifting iterations per PF.  Default 200.
-    envelope_epsilon : float
-        Sifting stops when mean(|1 - a(t)|) < envelope_epsilon.
-        Default 0.01 (i.e. envelope deviates from 1 by < 1% on average).
-    convergence_epsilon : float
-        Secondary stop: sifting stops when mean(|s_k - s_{k+1}|) <
-        convergence_epsilon.  Default 0.01.
-    smooth_method : str
-        How to smooth the step-wise local mean / envelope before sifting.
-        'moving_average' (default, faithful to the original paper) or
-        'cubic_spline' (smoother result, better for short segments).
-    smooth_iterations : int
-        Maximum moving-average passes.  Default 12.
-    include_endpoints : bool
-        Whether to treat signal endpoints as pseudo-extrema.  Default True.
+    max_pf              : max Product Functions to extract. Default 8.
+    endpoints           : treat signal endpoints as pseudo-extrema. Default True.
+    max_smooth_iter     : max moving-average passes. Default 15.
+    max_envelope_iter   : max sifting iterations per PF. Default 200.
+    envelope_epsilon    : stop when mean(|1-a|) < this. Default 0.01.
+    convergence_epsilon : stop when mean(|s-t|) < this. Default 0.01.
+    min_extrema         : stop extracting if residue has fewer extrema. Default 5.
     """
 
     def __init__(
         self,
         max_pf: int = 8,
-        max_sift_iter: int = 200,
+        endpoints: bool = True,
+        max_smooth_iter: int = 15,
+        max_envelope_iter: int = 200,
         envelope_epsilon: float = 0.01,
         convergence_epsilon: float = 0.01,
-        smooth_method: str = 'moving_average',
-        smooth_iterations: int = 12,
-        include_endpoints: bool = True,
+        min_extrema: int = 5,
     ):
         if max_pf < 1:
             raise ValueError(f"max_pf must be >= 1; got {max_pf}.")
-        if max_sift_iter < 1:
-            raise ValueError(f"max_sift_iter must be >= 1; got {max_sift_iter}.")
+        if max_envelope_iter < 1:
+            raise ValueError(f"max_envelope_iter must be >= 1; got {max_envelope_iter}.")
         if envelope_epsilon <= 0:
             raise ValueError(f"envelope_epsilon must be > 0; got {envelope_epsilon}.")
         if convergence_epsilon <= 0:
             raise ValueError(f"convergence_epsilon must be > 0; got {convergence_epsilon}.")
-        if smooth_method not in ('moving_average', 'cubic_spline'):
-            raise ValueError(
-                f"smooth_method must be 'moving_average' or 'cubic_spline'; got {smooth_method!r}."
-            )
-        self.max_pf               = max_pf
-        self.max_sift_iter        = max_sift_iter
-        self.envelope_epsilon     = envelope_epsilon
-        self.convergence_epsilon  = convergence_epsilon
-        self.smooth_method        = smooth_method
-        self.smooth_iterations    = smooth_iterations
-        self.include_endpoints    = include_endpoints
+        if min_extrema < 2:
+            raise ValueError(f"min_extrema must be >= 2; got {min_extrema}.")
+
+        self.max_pf              = max_pf
+        self.endpoints           = endpoints
+        self.max_smooth_iter     = max_smooth_iter
+        self.max_envelope_iter   = max_envelope_iter
+        self.envelope_epsilon    = envelope_epsilon
+        self.convergence_epsilon = convergence_epsilon
+        self.min_extrema         = min_extrema
+
+        # aliases for backward compatibility with existing aggregator code
+        self.include_endpoints = endpoints
 
     # ------------------------------------------------------------------
     # Public API
@@ -107,146 +96,161 @@ class LMD:
 
         Returns
         -------
-        List of 1-D arrays.  The first element is the highest-frequency PF,
-        the last element is the monotonic (or near-monotonic) residual.
-        All arrays have the same length as `sig`.
+        List of 1-D arrays, all the same length as `sig`.
+        Last element is the monotonic residual.
+        """
+        result = self.fit_transform(sig)
+        return [result[i] for i in range(result.shape[0])]
+
+    def fit_transform(self, sig: np.ndarray) -> np.ndarray:
+        """
+        Decompose signal. Returns 2-D array of shape (n_pfs, N).
         """
         sig = validate_signal_1d(sig, name='sig')
-        N   = len(sig)
 
-        # Edge case: constant / near-constant signal
+        # Constant signal: nothing to decompose
         if np.allclose(sig, sig[0]):
-            return [sig.copy()]
+            return sig.reshape(1, -1)
 
-        pfs     = []
+        pf      = []
         residue = sig.copy().astype(float)
 
-        for _ in range(self.max_pf):
-            if self._is_monotonic(residue):
-                break
+        while (len(pf) < self.max_pf) and (not self._is_monotonic(residue)):
             extrema = self._find_extrema(residue)
-            if len(extrema) < 4:          # need at least 2 half-waves
+            if len(extrema) < self.min_extrema:
                 break
 
-            pf = self._extract_pf(residue)
-            pfs.append(pf)
-            residue = residue - pf
-
-            if self._is_monotonic(residue):
+            component = self._extract_product_function(residue)
+            if component is None:
                 break
 
-        # Always append residual so that sum(pfs) == sig
-        if np.any(np.abs(residue) > 1e-10):
-            pfs.append(residue)
+            pf.append(component)
+            residue = residue - component
 
-        return pfs
+        # Always append residual so sum == original signal
+        pf.append(residue)
+        return np.array(pf)
 
     def reconstruct(self, pfs: List[np.ndarray]) -> np.ndarray:
-        """Reconstruct signal from Product Functions."""
         return np.sum(pfs, axis=0)
 
     # ------------------------------------------------------------------
-    # Core sifting machinery
+    # Core sifting
     # ------------------------------------------------------------------
 
-    def _extract_pf(self, sig: np.ndarray) -> np.ndarray:
-        """
-        Extract one Product Function from `sig` via the sifting process.
-
-        The final PF is  a_product(t) * s_final(t), where a_product is the
-        cumulative product of all envelope estimates obtained during sifting.
-        """
-        N = len(sig)
+    def _extract_product_function(self, sig: np.ndarray) -> Optional[np.ndarray]:
+        """Extract one PF via iterative envelope sifting."""
         s = sig.copy()
-        cumulative_envelope = np.ones(N)
+        n = len(sig)
+        envelopes: List[np.ndarray] = []
 
-        for _ in range(self.max_sift_iter):
+        for _ in range(self.max_envelope_iter):
             extrema = self._find_extrema(s)
-            if len(extrema) < 4:
+            if len(extrema) <= 3:
                 break
 
-            m, a = self._local_mean_and_envelope(s, extrema)
+            _m0, m, _a0, a = self._local_mean_and_envelope(s, extrema)
 
-            # Clamp envelope to avoid division by zero / negative values
-            a = np.maximum(a, 1e-8)
+            # Reference: clamp non-positive envelope values
+            for i in range(len(a)):
+                if a[i] <= 0:
+                    a[i] = 1.0 - 1e-4
 
-            h     = s - m            # subtract local mean
-            s_new = h / a            # demodulate by envelope
+            h = s - m        # subtract local mean
+            t = h / a        # demodulate by envelope
 
-            cumulative_envelope *= a
-
-            # Stopping criterion 1: envelope is flat
-            flat_err = np.mean(np.abs(1.0 - a))
-            if flat_err < self.envelope_epsilon:
-                s = s_new
+            # Guard: NaN/Inf during demodulation
+            if not np.all(np.isfinite(t)):
+                warnings.warn(
+                    "[LMD] Non-finite value in demodulated signal. "
+                    "Stopping sift early.",
+                    RuntimeWarning, stacklevel=2,
+                )
                 break
 
-            # Stopping criterion 2: FM signal has converged
-            conv_err = np.mean(np.abs(s - s_new))
-            if conv_err < self.convergence_epsilon:
-                s = s_new
+            # Terminate when pure FM signal obtained
+            err = np.sum(np.abs(1.0 - a)) / n
+            if err <= self.envelope_epsilon:
                 break
 
-            s = s_new
+            # Terminate when modulation signal has converged
+            err = np.sum(np.abs(s - t)) / n
+            if err <= self.convergence_epsilon:
+                break
 
-        # PF = cumulative envelope × final FM signal
-        return cumulative_envelope * s
+            # Clamp envelope before accumulating (overflow guard)
+            a_clamped = np.clip(a, 1e-8, 1e8)
+            envelopes.append(a_clamped)
+            s = t
+
+        # PF = product of all accumulated envelopes × final FM signal
+        component = s.copy()
+        for e in envelopes:
+            component = component * e
+
+        if not np.all(np.isfinite(component)):
+            return None
+
+        return component
+
+    # ------------------------------------------------------------------
+    # Local mean and envelope
+    # ------------------------------------------------------------------
 
     def _local_mean_and_envelope(
         self, sig: np.ndarray, extrema: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Compute smoothed local mean m(t) and local envelope a(t).
+        Compute raw and smoothed local mean m(t) and envelope a(t).
 
-        Steps (per Smith 2005):
-          1. Build step-wise mean and envelope from consecutive extrema pairs.
-          2. Smooth each step-function with the chosen smoother.
+        Algorithm (from Smith 2005 and PyLMD reference):
+          For each consecutive pair of extrema (n_i, n_{i+1}):
+            m_i = (sig[n_i] + sig[n_{i+1}]) / 2
+            a_i = |sig[n_i] - sig[n_{i+1}}| / 2
+          These step-functions are then smoothed with a triangular
+          moving-average filter whose window = max(diff(extrema)) // 3.
         """
-        N = len(sig)
-        t = np.arange(N)
+        n = len(sig)
         k = len(extrema)
 
-        # Build step-wise (piecewise-constant) local mean and envelope
-        mean_step = np.empty(N)
-        enve_step = np.empty(N)
+        mean_raw = np.empty(n)
+        enve_raw = np.empty(n)
 
-        prev_m = (sig[extrema[0]] + sig[extrema[1]]) / 2.0
-        prev_a = abs(sig[extrema[0]] - sig[extrema[1]]) / 2.0
-
+        prev_mean = (sig[extrema[0]] + sig[extrema[1]]) / 2.0
+        prev_enve = abs(sig[extrema[0]] - sig[extrema[1]]) / 2.0
         e_ptr = 1
-        for x in range(N):
+
+        for x in range(n):
             if e_ptr + 1 < k and x == extrema[e_ptr]:
-                next_m = (sig[extrema[e_ptr]] + sig[extrema[e_ptr + 1]]) / 2.0
-                next_a = abs(sig[extrema[e_ptr]] - sig[extrema[e_ptr + 1]]) / 2.0
-                mean_step[x] = (prev_m + next_m) / 2.0
-                enve_step[x] = (prev_a + next_a) / 2.0
-                prev_m = next_m
-                prev_a = next_a
-                e_ptr += 1
+                next_mean = (sig[extrema[e_ptr]] + sig[extrema[e_ptr + 1]]) / 2.0
+                next_enve = abs(sig[extrema[e_ptr]] - sig[extrema[e_ptr + 1]]) / 2.0
+                mean_raw[x] = (prev_mean + next_mean) / 2.0
+                enve_raw[x] = (prev_enve + next_enve) / 2.0
+                prev_mean   = next_mean
+                prev_enve   = next_enve
+                e_ptr      += 1
             else:
-                mean_step[x] = prev_m
-                enve_step[x] = prev_a
+                mean_raw[x] = prev_mean
+                enve_raw[x] = prev_enve
 
-        if self.smooth_method == 'cubic_spline':
-            m = self._spline_smooth(t, mean_step, extrema)
-            a = self._spline_smooth(t, enve_step, extrema)
-        else:
-            window = max(3, int(np.max(np.diff(extrema))) // 3)
-            m = self._moving_average_smooth(mean_step, window)
-            a = self._moving_average_smooth(enve_step, window)
+        # Window size from reference: max inter-extremum spacing // 3
+        window = max(int(np.max(np.diff(extrema))) // 3, 3)
+        mean_smooth = self._moving_average_smooth(mean_raw, window)
+        enve_smooth = self._moving_average_smooth(enve_raw, window)
 
-        return m, a
+        return mean_raw, mean_smooth, enve_raw, enve_smooth
 
     # ------------------------------------------------------------------
-    # Smoothers
+    # Moving average smoother (exact port of PyLMD reference)
     # ------------------------------------------------------------------
 
     def _moving_average_smooth(self, sig: np.ndarray, window: int) -> np.ndarray:
         """
-        Weighted moving-average smoother with triangular kernel.
-        Matches the approach described by Smith (2005) and PyLMD.
+        Triangular-kernel weighted moving average.
+        Directly ported from PyLMD / PySDKit reference implementations.
         """
         n = len(sig)
+
         if window < 3:
             window = 3
         if window % 2 == 0:
@@ -254,52 +258,51 @@ class LMD:
         half = window // 2
 
         # Triangular weight kernel
-        weight = np.array(list(range(1, half + 2)) + list(range(half, 0, -1)),
-                          dtype=float)
+        weight = np.array(
+            list(range(1, half + 2)) + list(range(half, 0, -1)), dtype=float
+        )
+        assert len(weight) == window
 
-        smoothed = sig.copy()
-        for _ in range(self.smooth_iterations):
-            prev = smoothed.copy()
-            conv = np.convolve(smoothed, weight, mode='same')
+        smoothed = sig.copy().astype(float)
 
-            # Centre region: divide by full kernel sum
-            conv[half: n - half] /= weight.sum()
+        for _ in range(self.max_smooth_iter):
+            head = []
+            tail = []
+            w_num = half
 
-            # Boundary regions: use partial kernel sums for correct normalisation
             for i in range(half):
-                w_left  = weight[half - i:]
-                w_right = weight[:n - half + i + 1] if n - half + i + 1 < len(weight) else weight
-                conv[i]         = np.dot(smoothed[:len(w_left)], w_left) / w_left.sum()
-                conv[n - 1 - i] = np.dot(smoothed[n - len(w_right):], np.flip(w_right)) / w_right.sum()
+                head.append(
+                    np.array([smoothed[j] for j in range(i - (half - w_num), i + half + 1)])
+                )
+                tail.append(
+                    np.flip([smoothed[-(j + 1)] for j in range(i - (half - w_num), i + half + 1)])
+                )
+                w_num -= 1
 
-            smoothed = conv
+            smoothed = np.convolve(smoothed, weight, mode='same')
+            smoothed[half: -half] = smoothed[half: -half] / weight.sum()
 
-            # Check for convergence of the smoother itself
-            if np.max(np.abs(smoothed - prev)) < 1e-10:
+            w_num = half
+            for i in range(half):
+                smoothed[i]         = np.dot(head[i], weight[w_num:]) / weight[w_num:].sum()
+                smoothed[-(i + 1)]  = np.dot(tail[i], weight[:-w_num]) / weight[:-w_num].sum()
+                w_num -= 1
+
+            if self._is_smooth(smoothed, n):
                 break
 
         return smoothed
 
-    def _spline_smooth(
-        self, t: np.ndarray, step: np.ndarray, extrema: np.ndarray
-    ) -> np.ndarray:
+    @staticmethod
+    def _is_smooth(sig: np.ndarray, n: int) -> bool:
         """
-        Cubic-spline interpolation through the midpoints of the step-function.
-        Provides a smoother local mean / envelope than moving-average.
+        Reference logic: returns True (stop) when NO two consecutive
+        samples are equal (the plateau test from PyLMD).
         """
-        # Use extrema positions as knot locations
-        xs = extrema.astype(float)
-        ys = step[extrema]
-
-        if len(xs) < 2:
-            return np.full_like(step, np.mean(step))
-
-        try:
-            cs = CubicSpline(xs, ys, bc_type='not-a-knot', extrapolate=True)
-            return cs(t)
-        except Exception:
-            # Fall back to linear interpolation on failure
-            return np.interp(t, xs, ys)
+        for x in range(1, n):
+            if sig[x] == sig[x - 1]:
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Utilities
@@ -307,11 +310,11 @@ class LMD:
 
     def _find_extrema(self, sig: np.ndarray) -> np.ndarray:
         """Return sorted indices of all local maxima and minima."""
-        maxima = scipy_signal.argrelextrema(sig, np.greater)[0]
-        minima = scipy_signal.argrelextrema(sig, np.less)[0]
+        maxima = argrelextrema(sig, np.greater)[0]
+        minima = argrelextrema(sig, np.less)[0]
         extrema = np.sort(np.concatenate([maxima, minima]))
 
-        if self.include_endpoints:
+        if self.endpoints:
             n = len(sig)
             if len(extrema) == 0 or extrema[0] != 0:
                 extrema = np.concatenate([[0], extrema])
@@ -321,5 +324,5 @@ class LMD:
         return extrema
 
     def _is_monotonic(self, sig: np.ndarray) -> bool:
-        diff = np.diff(sig)
-        return bool(np.all(diff >= 0) or np.all(diff <= 0))
+        d = np.diff(sig)
+        return bool(np.all(d >= 0) or np.all(d <= 0))
