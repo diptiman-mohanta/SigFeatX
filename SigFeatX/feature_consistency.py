@@ -88,6 +88,11 @@ _CONTRACTS: Dict[str, Tuple] = {
     # warn_only=True: high values on tonal signals are expected and correct.
     "spectral_kurtosis":    (0.0,   None,  True),
 
+    # 3rd standardised moment of the power spectrum.
+    # For asymmetric near-tonal spectra |values| can far exceed 20 legitimately.
+    # Same rationale as spectral_kurtosis. Unbounded.
+    "spectral_skewness":    (None,  None,  True),
+
     # ── Entropy ──────────────────────────────────────────────────────────────
     "sample_entropy":       (0.0,   None,  False),
     "approximate_entropy":  (None,  None,  True),   # can be negative with this estimator
@@ -111,22 +116,37 @@ def validate_feature_dict(
     """
     Check every feature value in `features` against known mathematical contracts.
 
-    Parameters
-    ----------
-    features          : dict returned by any of your *Features.extract() methods
-    method            : human label used in violation messages
-    raise_on_violation: if True, raises ValueError on the first hard violation
+    Lookup order for each feature key:
+      1. Exact match in _CONTRACTS
+      2. Strip a known method prefix (raw_, fourier_, dwt_, emd_, vmd_, etc.)
+         and try again
+      3. Skip if no match
 
-    Returns
-    -------
-    List of ContractViolation (empty list = all clear)
+    Compound feature names like 'spectral_skewness' are looked up whole — we
+    never strip 'spectral_' because it's part of the feature identity, not a
+    method prefix.
     """
+    # Known method prefixes added by FeatureAggregator._add_prefix.
+    # 'spectral_', 'hjorth_', 'bandpower_' etc. are NOT method prefixes — they
+    # are part of the feature identity and must NOT be stripped.
+    KNOWN_METHOD_PREFIXES = (
+        "raw_", "fourier_", "stft_", "dwt_", "wpd_",
+        "emd_", "vmd_", "svmd_", "efd_", "lmd_", "jmd_",
+    )
+
     violations = []
 
     for name, value in features.items():
-        # Strip any prefix added by _add_prefix(), e.g. "raw_rms" -> "rms"
-        bare_name = name.split("_", 1)[-1] if "_" in name else name
-        contract = _CONTRACTS.get(bare_name) or _CONTRACTS.get(name)
+        contract = _CONTRACTS.get(name)
+
+        if contract is None:
+            for prefix in KNOWN_METHOD_PREFIXES:
+                if name.startswith(prefix):
+                    stripped = name[len(prefix):]
+                    contract = _CONTRACTS.get(stripped)
+                    if contract is not None:
+                        break
+
         if contract is None:
             continue
 
