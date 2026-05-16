@@ -1,50 +1,131 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "SigFeatX"
-version = "0.1.0"
-description = "A comprehensive signal feature extraction library"
+version = "0.2.0"
+description = "Comprehensive signal feature extraction with decomposition, batch processing, and sklearn integration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Diptiman Mohanta", email = "diptimanmohanta7@gmail.com"}
 ]
-keywords = ["signal processing", "feature extraction", "decomposition", "time series"]
+maintainers = [
+    {name = "Diptiman Mohanta", email = "diptimanmohanta7@gmail.com"}
+]
+keywords = [
+    "signal processing",
+    "feature extraction",
+    "decomposition",
+    "time series",
+    "EMD",
+    "VMD",
+    "wavelet",
+    "EEG",
+    "ECG",
+    "biomedical",
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering :: Signal Processing",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Mathematics",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
 ]
 
 dependencies = [
     "numpy>=1.20.0",
     "scipy>=1.7.0",
     "PyWavelets>=1.1.1",
+    "pandas>=1.3.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=6.0",
-    "pytest-cov>=2.0",
-    "black>=21.0",
-    "flake8>=3.9",
+sklearn = [
+    "scikit-learn>=1.3",
 ]
-examples = [
-    "pandas>=1.3.0",
-    "matplotlib>=3.3.0",
+progress = [
+    "tqdm>=4.60",
+]
+parquet = [
+    "pyarrow>=10.0",
+]
+hdf5 = [
+    "tables>=3.7",
+    "h5py>=3.0",
+]
+viz = [
+    "matplotlib>=3.5",
+    "seaborn>=0.12",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5",
+    "build>=1.0",
+    "twine>=4.0",
+]
+all = [
+    "scikit-learn>=1.3",
+    "tqdm>=4.60",
+    "pyarrow>=10.0",
+    "tables>=3.7",
+    "h5py>=3.0",
+    "matplotlib>=3.5",
 ]
 
 [project.urls]
 Homepage = "https://github.com/diptiman-mohanta/SigFeatX"
 Documentation = "https://github.com/diptiman-mohanta/SigFeatX/blob/main/README.md"
 Repository = "https://github.com/diptiman-mohanta/SigFeatX.git"
-"Bug Tracker" = "https://github.com/diptiman-mohanta/SigFeatX/issues"
+Issues = "https://github.com/diptiman-mohanta/SigFeatX/issues"
+Changelog = "https://github.com/diptiman-mohanta/SigFeatX/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["SigFeatX*"]
+exclude = ["tests*", "examples*", "benchmarks*"]
+
+[tool.setuptools.package-data]
+SigFeatX = ["py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+filterwarnings = [
+    "error::DeprecationWarning:SigFeatX",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "N", "UP", "RUF"]
+ignore = [
+    "E501",  # line-length handled by formatter
+    "N803",  # capital-letter args (K, N) are math convention
+    "N806",  # capital locals (K, N) ditto
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

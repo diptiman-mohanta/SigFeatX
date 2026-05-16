@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include requirements.txt
+include pyproject.toml
+recursive-include SigFeatX *.py py.typed
+recursive-exclude tests *
+recursive-exclude examples *
+recursive-exclude benchmarks *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
