@@ -38,7 +38,7 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Union
-
+from ._progress import ProgressBar
 from ._validation import (
     validate_n_jobs,
     validate_sampling_rate,
@@ -148,7 +148,7 @@ class FeatureAggregator:
         self.svmd    = SVMD()
         self.efd     = EFD()
         self.lmd     = LMD()
-        self.jmd     = JMD()
+        self.jmd     = JMD(K=3)
 
         self.time_features      = TimeDomainFeatures()
         self.freq_features      = FrequencyDomainFeatures()
@@ -320,21 +320,21 @@ class FeatureAggregator:
             )
 
         if n_jobs == 1:
-            for i, sig in enumerate(signals):
-                if show_progress:
-                    print(f"\r  Batch: {i+1}/{n_signals}", end="", flush=True)
-                try:
-                    agg = FeatureAggregator(fs=self.fs)
-                    results[i] = agg.extract_all_features(sig, **extract_kwargs)
-                except Exception as exc:
-                    if on_error == 'raise':
-                        raise
-                    warnings.warn(
-                        f"[SigFeatX] extract_batch: signal {i} failed: {exc}",
-                        RuntimeWarning, stacklevel=2,
-                    )
-                    results[i] = None
-                    errors[i]  = exc
+            with ProgressBar(total=n_signals, desc="Batch", enabled=show_progress) as bar:
+                for i, sig in enumerate(signals):
+                    try:
+                        agg = FeatureAggregator(fs=self.fs)
+                        results[i] = agg.extract_all_features(sig, **extract_kwargs)
+                    except Exception as exc:
+                        if on_error == 'raise':
+                            raise
+                        warnings.warn(
+                            f"[SigFeatX] extract_batch: signal {i} failed: {exc}",
+                            RuntimeWarning, stacklevel=2,
+                        )
+                        results[i] = None
+                        errors[i]  = exc
+                    bar.update(1)
         else:
             task_results = _run_parallel_extract(
                 {i: sig for i, sig in enumerate(signals)},
@@ -839,22 +839,20 @@ def _run_parallel_extract(
     total = len(tasks) if total is None else total
 
     def _execute(executor_cls):
-        outputs: Dict[Any, Union[Dict[str, float], Exception]] = {}
-        with executor_cls(max_workers=max_workers) as executor:
+        outputs = {}
+        with executor_cls(max_workers=max_workers) as executor, \
+            ProgressBar(total=total, desc="Batch", enabled=show_progress) as bar:
             futures = {
                 executor.submit(_worker_extract, sig, fs, extract_kwargs): key
                 for key, sig in tasks.items()
             }
-            completed = 0
             for future in as_completed(futures):
                 key = futures[future]
-                completed += 1
-                if show_progress:
-                    print(f"\r  Batch: {completed}/{total}", end="", flush=True)
                 try:
                     outputs[key] = future.result()
                 except Exception as exc:
                     outputs[key] = exc
+                bar.update(1)
         return outputs
 
     try:
