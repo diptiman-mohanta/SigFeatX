@@ -49,13 +49,17 @@ from ._validation import (
 )
 from .preprocess import SignalPreprocessor
 from .decompose import (
-    FourierTransform, ShortTimeFourierTransform, WaveletDecomposer,
-    EMD, VMD, SVMD, EFD, LMD, JMD,
-)
+        FourierTransform, ShortTimeFourierTransform, WaveletDecomposer,
+        EMD, VMD, SVMD, EFD, LMD, JMD,
+        MODWT, CEEMDAN, HHT, SST,
+    )
 from .features.features import (
-    TimeDomainFeatures, FrequencyDomainFeatures,
-    EntropyFeatures, NonlinearFeatures, DecompositionFeatures,
-)
+        TimeDomainFeatures, FrequencyDomainFeatures,
+        EntropyFeatures, NonlinearFeatures, DecompositionFeatures,
+    )
+from .features.rqa import RQAFeatures
+from .features.mfdfa import MFDFAFeatures
+from .features.advanced_entropy import AdvancedEntropyFeatures
 from .decomposition_validator import DecompositionValidator, DecompositionReport
 from .feature_consistency import validate_feature_dict, CrossMethodChecker
 
@@ -149,6 +153,10 @@ class FeatureAggregator:
         self.efd     = EFD()
         self.lmd     = LMD()
         self.jmd     = JMD(K=3)
+        self.modwt   = MODWT()
+        self.ceemdan = CEEMDAN(trials=20)     # small default for speed
+        self.hht     = HHT(fs=self.fs)
+        self.sst     = SST(fs=self.fs)
 
         self.time_features      = TimeDomainFeatures()
         self.freq_features      = FrequencyDomainFeatures()
@@ -703,6 +711,9 @@ class FeatureAggregator:
         features.update(self.freq_features.extract(sig, self.fs))
         features.update(self.entropy_features.extract(sig))
         features.update(self.nonlinear_features.extract(sig))
+        features.update(AdvancedEntropyFeatures.extract(sig))
+        features.update(RQAFeatures.extract(sig))
+        features.update(MFDFAFeatures.extract(sig))
         violations = validate_feature_dict(features, method="raw")
         for v in violations:
             warnings.warn(str(v), RuntimeWarning, stacklevel=3)
@@ -766,7 +777,6 @@ class FeatureAggregator:
             features.update(self.decomp_features.extract_from_components(pfs, 'lmd'))
             if validate:
                 quality_report = DecompositionValidator.evaluate(sig, pfs, method="LMD")
- 
         elif method == 'jmd':
             modes, jump = self.jmd.decompose(sig)
             modes_list  = [modes[i] for i in range(len(modes))]
@@ -779,11 +789,26 @@ class FeatureAggregator:
             features['jmd_jump_n_steps'] = float(_count_jump_steps(jump))
             if validate:
                 quality_report = DecompositionValidator.evaluate(sig, modes, method="JMD")
- 
+        elif method == 'modwt':
+            coeffs = self.modwt.decompose(sig)
+            features.update(self.decomp_features.extract_from_components(coeffs, 'modwt'))
+            if validate:
+                quality_report = DecompositionValidator.evaluate(sig, coeffs, method='MODWT')
+        elif method == 'ceemdan':
+            imfs = self.ceemdan.decompose(sig)
+            features.update(self.decomp_features.extract_from_components(imfs, 'ceemdan'))
+            if validate:
+                quality_report = DecompositionValidator.evaluate(sig, imfs, method='CEEMDAN')
+        elif method == 'hht':
+            features.update(self.hht.extract_features(sig))
+            # HHT does its own decomp internally; no quality_report for now.
+        elif method == 'sst':
+            features.update(self.sst.extract_features(sig))
         else:
             raise ValueError(
                 f"Unknown decomposition method '{method}'. "
-                "Valid: 'fourier','stft','dwt','wpd','emd','vmd','svmd','efd','lmd','jmd'."
+                "Valid: 'fourier','stft','dwt','wpd','emd','vmd','svmd','efd',"
+                "'lmd','jmd','modwt','ceemdan','hht','sst'."
             )
         
         violations = validate_feature_dict(features, method=method)
