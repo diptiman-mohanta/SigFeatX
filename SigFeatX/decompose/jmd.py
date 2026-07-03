@@ -161,7 +161,7 @@ class JMD:
         # ── ADMM loop ──────────────────────────────────────────────────
         u_diff = self.tol + np.spacing(1)
         n      = 0
-        sum_uk = 0
+        sum_uk: np.ndarray | complex = 0
 
         while u_diff > self.tol and n < self.max_iter - 1:
 

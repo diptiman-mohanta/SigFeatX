@@ -139,7 +139,7 @@ class VMD:
         Alpha   = self.alpha * np.ones(self.K)
         u_diff  = self.tol + np.spacing(1)
         n       = 0
-        sum_uk  = 0
+        sum_uk: np.ndarray | complex = 0
 
         # ── Main ADMM loop ─────────────────────────────────────────────
         while u_diff > self.tol and n < self.max_iter - 1:
