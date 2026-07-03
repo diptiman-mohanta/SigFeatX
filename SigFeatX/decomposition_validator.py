@@ -28,9 +28,9 @@ Or attach it to FeatureAggregator.extract_all_features() to get a report dict
 alongside every feature dict.
 """
 
-import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Optional
+
+import numpy as np
 
 
 @dataclass
@@ -42,7 +42,7 @@ class DecompositionReport:
     energy_preservation: float    # should be 1.0
     n_components: int
     passed: bool
-    _warnings: List[str] = field(default_factory=list)
+    _warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         snr_str = "     inf (perfect)" if not np.isfinite(self.snr_db) else f"{self.snr_db:>8.2f} dB"
@@ -123,9 +123,9 @@ class DecompositionValidator:
         original: np.ndarray,
         components,                     # list of arrays OR 2-D array (n_comp x N)
         method: str = "unknown",
-        snr_threshold_db: Optional[float] = None,
-        max_reconstruction_error: Optional[float] = None,
-        max_energy_deviation: Optional[float] = None,
+        snr_threshold_db: float | None = None,
+        max_reconstruction_error: float | None = None,
+        max_energy_deviation: float | None = None,
     ) -> DecompositionReport:
         """
         Evaluate quality of a decomposition.

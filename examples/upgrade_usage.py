@@ -54,7 +54,7 @@ print("=" * 60)
 # ── Bandpass filter ────────────────────────────────────────────────────────
 # Keep only 8–40 Hz (EEG alpha/beta band)
 sig_bp = pp.bandpass(signal_eeg, low_hz=8, high_hz=40, fs=fs)
-print(f"\nBandpass 8-40 Hz:")
+print("\nBandpass 8-40 Hz:")
 print(f"  Input  RMS: {np.sqrt(np.mean(signal_eeg**2)):.4f}")
 print(f"  Output RMS: {np.sqrt(np.mean(sig_bp**2)):.4f}")
 
@@ -69,12 +69,13 @@ sig_notch = pp.notch(signal_eeg, freq_hz=50, fs=fs, quality_factor=30)
 
 # Verify: compute power in 48-52 Hz band before and after
 from scipy.signal import welch
+
 freqs, psd_before = welch(signal_eeg, fs=fs, nperseg=256)
 freqs, psd_after  = welch(sig_notch,  fs=fs, nperseg=256)
 notch_band = (freqs >= 48) & (freqs <= 52)
 power_before = np.sum(psd_before[notch_band])
 power_after  = np.sum(psd_after[notch_band])
-print(f"\nNotch 50 Hz (Q=30):")
+print("\nNotch 50 Hz (Q=30):")
 print(f"  Power in 48-52 Hz before: {power_before:.4f}")
 print(f"  Power in 48-52 Hz after : {power_after:.6f}")
 print(f"  Reduction: {(1 - power_after/power_before) * 100:.1f}%")
@@ -82,7 +83,7 @@ print(f"  Reduction: {(1 - power_after/power_before) * 100:.1f}%")
 # Chain notch + bandpass: remove line noise, then keep 1-40 Hz
 sig_clean = pp.notch(signal_eeg, freq_hz=50, fs=fs)
 sig_clean = pp.bandpass(sig_clean, low_hz=1, high_hz=40, fs=fs)
-print(f"\nChained notch + bandpass (1-40 Hz, 50 Hz removed):")
+print("\nChained notch + bandpass (1-40 Hz, 50 Hz removed):")
 print(f"  Output RMS: {np.sqrt(np.mean(sig_clean**2)):.4f}")
 
 # Also available as a denoise() option
@@ -97,7 +98,7 @@ sig_als = pp.detrend(signal_eeg, method='als')
 baseline_pure = 0.5 * np.sin(2 * np.pi * 0.3 * t)
 corr_before = np.corrcoef(signal_eeg, baseline_pure)[0, 1]
 corr_after  = np.corrcoef(sig_als,    baseline_pure)[0, 1]
-print(f"\nALS baseline correction (lam=1e4, p=0.01):")
+print("\nALS baseline correction (lam=1e4, p=0.01):")
 print(f"  Correlation with 0.3 Hz baseline before: {corr_before:.4f}")
 print(f"  Correlation with 0.3 Hz baseline after : {corr_after:.4f}")
 print(f"  Baseline removed: {'YES' if abs(corr_after) < abs(corr_before) else 'NO'}")
@@ -136,7 +137,7 @@ print(f"  Sample features: {result.feature_names[:5]}")
 
 # ── Batch processing with intentional error isolation ─────────────────────
 print("\nBatch with error isolation (one bad signal):")
-bad_signals = batch_signals[:5] + [np.array([np.nan, np.nan])] + batch_signals[5:10]
+bad_signals = [*batch_signals[:5], np.array([np.nan, np.nan]), *batch_signals[5:10]]
 result_err = agg.extract_batch(
     bad_signals,
     decomposition_methods=['fourier'],
@@ -185,13 +186,13 @@ print(f"  Cross features per pair: {len(cross_keys) // 3}")   # 3 pairs from 3 c
 
 # Show PLV values between channel pairs
 plv_keys = [k for k in cross_keys if 'plv' in k]
-print(f"\n  Phase-Locking Values:")
+print("\n  Phase-Locking Values:")
 for k in plv_keys:
     print(f"    {k}: {ch_features[k]:.4f}")
 
 # Show cross-correlation lags (should reflect the 50 and 25-sample offsets)
 lag_keys = [k for k in cross_keys if 'xcorr_lag' in k]
-print(f"\n  Cross-correlation lags (expected ~50 and ~25 samples):")
+print("\n  Cross-correlation lags (expected ~50 and ~25 samples):")
 for k in lag_keys:
     print(f"    {k}: {ch_features[k]:.0f} samples")
 

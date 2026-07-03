@@ -15,22 +15,23 @@ Output: tests/figures/decomp_vis_<method>.png  (one file per method)
 
 import os
 import sys
-import numpy as np
+
 import matplotlib
+import numpy as np
+
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 # ── Path setup ───────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from SigFeatX.decompose.emd     import EMD
-from SigFeatX.decompose.vmd     import VMD
-from SigFeatX.decompose.svmd    import SVMD
-from SigFeatX.decompose.efd     import EFD
+from SigFeatX.decompose.efd import EFD
+from SigFeatX.decompose.emd import EMD
+from SigFeatX.decompose.svmd import SVMD
+from SigFeatX.decompose.vmd import VMD
 from SigFeatX.decompose.wavelet import WaveletDecomposer
-
 
 # ============================================================================
 # Figures directory
@@ -145,7 +146,6 @@ def decompose_dwt(sig):
     return padded, recon, 'DWT (db4)', 'Level', labels
 
 def decompose_dwt_labels(sig):
-    import pywt
     wav    = WaveletDecomposer(wavelet='db4')
     coeffs = wav.dwt(sig, level=4)
     labels = (

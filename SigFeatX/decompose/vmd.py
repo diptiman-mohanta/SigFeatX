@@ -22,6 +22,7 @@ Key design decisions (all from the reference):
 """
 
 import numpy as np
+
 from SigFeatX._validation import validate_signal_1d
 
 
@@ -198,7 +199,6 @@ class VMD:
         # ── Reconstruction ─────────────────────────────────────────────
         # Discard empty rows if converged early
         Niter = min(self.max_iter, n)
-        omega = omega_plus[:Niter, :]           # not used externally here
 
         # Build two-sided spectrum by conjugate mirroring
         idxs   = np.flip(np.arange(1, T // 2 + 1))

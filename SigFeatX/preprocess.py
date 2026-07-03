@@ -1,13 +1,13 @@
 """
-SigFeatX - preprocess.py 
+SigFeatX - preprocess.py
 """
 
 import warnings
+
 import numpy as np
 from scipy import signal as scipy_signal
 from scipy.sparse import diags
 from scipy.sparse.linalg import spsolve
-from typing import Optional
 
 from ._validation import validate_sampling_rate, validate_signal_1d
 
@@ -58,7 +58,11 @@ class SignalPreprocessor:
         try:
             import pywt
         except ImportError:
-            warnings.warn("pywt not installed; returning signal unchanged.", RuntimeWarning)
+            warnings.warn(
+                "pywt not installed; returning signal unchanged.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             return sig.copy()
 
         coeffs = pywt.wavedec(sig, wavelet, level=level)
@@ -169,7 +173,7 @@ class SignalPreprocessor:
         freq_hz        : frequency to remove in Hz
         fs             : sampling frequency in Hz (default 1.0 for normalised)
         quality_factor : Q factor. Higher Q = narrower notch.
-                         Typical values: 10–50. Default 30.
+                         Typical values: 10-50. Default 30.
 
         Returns
         -------
@@ -298,7 +302,7 @@ class SignalPreprocessor:
         DtD = (D.T).dot(D)           # (N, N) sparse matrix
 
         # Initialise weights uniformly
-        w = np.ones(N)
+        w: np.ndarray = np.ones(N)
 
         baseline = sig.copy()
         for _ in range(n_iter):

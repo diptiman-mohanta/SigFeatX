@@ -11,8 +11,8 @@ import sys
 import time
 import tracemalloc
 import warnings
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Callable, List
 
 import numpy as np
 
@@ -45,10 +45,10 @@ def _make_signal(n_samples: int, fs: float, seed: int) -> np.ndarray:
     return signal
 
 
-def _time_call(fn: Callable[[], object], repeats: int, warmup: int) -> tuple[list[float], list[float], List[str]]:
+def _time_call(fn: Callable[[], object], repeats: int, warmup: int) -> tuple[list[float], list[float], list[str]]:
     timings_s: list[float] = []
     peak_mem_mib: list[float] = []
-    notes: List[str] = []
+    notes: list[str] = []
 
     for iteration in range(warmup + repeats):
         tracemalloc.start()
@@ -85,7 +85,7 @@ def _benchmark(name: str, fn: Callable[[], object], repeats: int, warmup: int) -
     )
 
 
-def _format_table(results: List[BenchmarkResult]) -> str:
+def _format_table(results: list[BenchmarkResult]) -> str:
     headers = ("Benchmark", "Median ms", "Mean ms", "Best ms", "Stdev ms", "Peak MiB", "Notes")
     rows = [
         (
@@ -113,12 +113,12 @@ def _format_table(results: List[BenchmarkResult]) -> str:
     return "\n".join(lines)
 
 
-def _parse_n_jobs_list(raw: str) -> List[int]:
+def _parse_n_jobs_list(raw: str) -> list[int]:
     values = [chunk.strip() for chunk in raw.split(",") if chunk.strip()]
     if not values:
         raise ValueError("--n-jobs-list must contain at least one value.")
 
-    parsed: List[int] = []
+    parsed: list[int] = []
     for value in values:
         n_jobs = int(value)
         if n_jobs != -1 and n_jobs < 1:

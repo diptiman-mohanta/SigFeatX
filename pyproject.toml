@@ -51,10 +51,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=1.20.0",
-    "scipy>=1.7.0",
-    "PyWavelets>=1.1.1",
-    "pandas>=1.3.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "PyWavelets>=1.4.0",
+    "pandas>=1.5.3",
 ]
 
 [project.optional-dependencies]
@@ -78,8 +78,8 @@ viz = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "ruff>=0.1.0",
-    "mypy>=1.5",
+    "ruff>=0.8.0",
+    "mypy>=1.10",
     "build>=1.0",
     "twine>=4.0",
 ]
@@ -129,10 +129,21 @@ ignore = [
     "E501",  # line-length handled by formatter
     "N803",  # capital-letter args (K, N) are math convention
     "N806",  # capital locals (K, N) ditto
+    "N999",  # package is named SigFeatX on PyPI; renaming would break imports
+    "RUF001",  # typographic -/x/. used deliberately in docs/comments/test output
+    "RUF002",
+    "RUF003",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E402", "F401", "F541", "I001"]  # demo scripts: linear top-to-bottom narration
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+# numpy's stubs return `Any` from many reductions/creation functions and
+# distinguish fixed-ndim array shapes in ways real code doesn't track;
+# enforcing these here would mean scattering casts through numeric code
+# for no behavioural benefit.
+disable_error_code = ["no-any-return"]

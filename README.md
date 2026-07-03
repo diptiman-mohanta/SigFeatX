@@ -67,19 +67,16 @@ A comprehensive Python library for extracting statistical features from 1D signa
 git clone https://github.com/diptiman-mohanta/SigFeatX.git
 cd SigFeatX
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Install the package
+# Install the package (core dependencies come from pyproject.toml)
 pip install -e .
 ```
 
 ### Requirements
 ```
-numpy>=1.20.0
-scipy>=1.7.0
-PyWavelets>=1.1.1
-pandas>=1.3.0
+numpy>=1.24.0
+scipy>=1.10.0
+PyWavelets>=1.4.0
+pandas>=1.5.0
 ```
 
 ## Quick Start

@@ -11,7 +11,6 @@ Includes:
   - Bubble Entropy       (Manis et al. 2017)
 """
 
-from typing import Dict, Optional
 
 import numpy as np
 from scipy.stats import norm
@@ -95,7 +94,7 @@ class AdvancedEntropyFeatures:
     def fuzzy_entropy(
         sig: np.ndarray,
         m: int = 2,
-        r: Optional[float] = None,
+        r: float | None = None,
         n: int = 2,
     ) -> float:
         """
@@ -180,18 +179,18 @@ class AdvancedEntropyFeatures:
         # Standard LZ76 parsing
         i = 0
         c = 1
-        l = 1
+        pos = 1
         k = 1
         k_max = 1
         while True:
-            if s[i + k - 1] != s[l + k - 1]:
+            if s[i + k - 1] != s[pos + k - 1]:
                 if k > k_max:
                     k_max = k
                 i += 1
-                if i == l:
+                if i == pos:
                     c += 1
-                    l += k_max
-                    if l + 1 > N:
+                    pos += k_max
+                    if pos + 1 > N:
                         break
                     i = 0
                     k = 1
@@ -200,7 +199,7 @@ class AdvancedEntropyFeatures:
                     k = 1
             else:
                 k += 1
-                if l + k > N:
+                if pos + k > N:
                     c += 1
                     break
 
@@ -221,14 +220,18 @@ class AdvancedEntropyFeatures:
         Reference: Manis et al. (2017), "Bubble Entropy: An Entropy Almost
         Free of Parameters", IEEE Trans. Biomedical Engineering 64(11).
 
-        Counts swaps a bubble sort would need on each embedded vector,
-        then takes the entropy of that count distribution.
+        Counts swaps a bubble sort would need on each embedded vector, then
+        takes the *Renyi entropy of order 2* (not Shannon entropy) of that
+        count distribution, and normalises by log((m+1)/(m-1)) per Eq. 8-9
+        of the paper. Matches the reference EntropyHub/PyEntropy formula.
 
         Parameters
         ----------
-        m : embedding dimension. Default 10 (works well for many signals).
+        m : embedding dimension >= 2. Default 10 (works well for many signals).
         """
         sig = validate_signal_1d(sig, name='sig')
+        if m < 2:
+            raise ValueError(f"m must be >= 2; got {m}.")
         N = len(sig)
         if N < m + 1:
             return 0.0
@@ -252,19 +255,21 @@ class AdvancedEntropyFeatures:
         s_m = _swap_dist(m)
         s_m1 = _swap_dist(m + 1)
 
-        def _entropy(arr: np.ndarray) -> float:
+        def _renyi2_entropy(arr: np.ndarray) -> float:
             _, counts = np.unique(arr, return_counts=True)
             p = counts / float(counts.sum())
-            return float(-np.sum(p * np.log(p + 1e-12)))
+            return float(-np.log(np.sum(p ** 2)))
 
-        return float(_entropy(s_m1) - _entropy(s_m))
+        h_m = _renyi2_entropy(s_m)
+        h_m1 = _renyi2_entropy(s_m1)
+        return float((h_m1 - h_m) / np.log((m + 1) / (m - 1)))
 
     # ==================================================================
     # Bundle
     # ==================================================================
 
     @staticmethod
-    def extract(sig: np.ndarray) -> Dict[str, float]:
+    def extract(sig: np.ndarray) -> dict[str, float]:
         """
         Compute all four advanced entropies with sensible defaults.
         """

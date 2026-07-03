@@ -27,11 +27,9 @@ Key differences from our previous naive version:
      the standard choice in signal processing).
 """
 
-import warnings
 import numpy as np
 from scipy import signal as scipy_signal
 from scipy.interpolate import CubicSpline
-from typing import List, Optional, Tuple
 
 from SigFeatX._validation import validate_signal_1d
 
@@ -81,14 +79,14 @@ class EMD:
         self.range_thr         = range_thr
 
         # storage for last run
-        self.imfs    = None
-        self.residue = None
+        self.imfs: np.ndarray | None    = None
+        self.residue: np.ndarray | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def decompose(self, sig: np.ndarray) -> List[np.ndarray]:
+    def decompose(self, sig: np.ndarray) -> list[np.ndarray]:
         """
         Decompose signal into IMFs.
 
@@ -112,7 +110,7 @@ class EMD:
         residue = sig.copy().astype(float)
         imf_no  = 0
         ext_no  = -1
-        IMF     = np.empty((0, N), dtype=float)
+        IMF: np.ndarray = np.empty((0, N), dtype=float)
         finished = False
 
         while not finished:
@@ -120,7 +118,7 @@ class EMD:
             imf     = residue.copy()
             mean    = np.zeros(N)
 
-            for n in range(1, self.MAX_ITERATION + 1):
+            for _n in range(1, self.MAX_ITERATION + 1):
                 max_pos, max_val, min_pos, min_val, _ = self._find_extrema(t, imf)
                 ext_no = len(max_pos) + len(min_pos)
 
@@ -163,11 +161,11 @@ class EMD:
 
         return IMF
 
-    def reconstruct(self, imfs: List[np.ndarray]) -> np.ndarray:
+    def reconstruct(self, imfs: list[np.ndarray]) -> np.ndarray:
         return np.sum(imfs, axis=0)
 
-    def get_imfs_and_residue(self) -> Tuple[np.ndarray, np.ndarray]:
-        if self.imfs is None:
+    def get_imfs_and_residue(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.imfs is None or self.residue is None:
             raise ValueError("Run fit_transform first.")
         return self.imfs, self.residue
 
@@ -235,7 +233,7 @@ class EMD:
 
     def _find_extrema(
         self, t: np.ndarray, sig: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Find local maxima, minima, and zero-crossings.
 
@@ -267,7 +265,7 @@ class EMD:
         max_val: np.ndarray,
         min_pos: np.ndarray,
         min_val: np.ndarray,
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
         """
         Build upper and lower envelopes using cubic spline with
         symmetric boundary mirroring (nbsym extrema reflected at each end).
@@ -294,7 +292,7 @@ class EMD:
         t: np.ndarray,
         pos: np.ndarray,
         val: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Extend extrema arrays by reflecting the nbsym outermost extrema
         symmetrically about each endpoint of the signal.

@@ -27,8 +27,8 @@ than vanilla EMD (typical factor ~50 for I=50, max_imf=10), so the default
 trial count is conservative. Bump it for production analyses.
 """
 
+
 import numpy as np
-from typing import List, Optional
 
 from .._validation import validate_signal_1d
 from .emd import EMD
@@ -82,7 +82,7 @@ class CEEMDAN:
     # Public API
     # ------------------------------------------------------------------
 
-    def decompose(self, sig: np.ndarray) -> List[np.ndarray]:
+    def decompose(self, sig: np.ndarray) -> list[np.ndarray]:
         """
         Decompose ``sig`` into CEEMDAN IMFs plus a final residual.
 
@@ -94,18 +94,22 @@ class CEEMDAN:
         N = len(sig)
         sig_std = float(np.std(sig)) + 1e-12
 
-        # Pre-generate I noise realisations, scaled by signal std
+        # Pre-generate I *unit-amplitude* noise realisations. Kept unscaled
+        # so E_k(white[i]) can be rescaled fresh at every stage relative to
+        # the current residue's std -- this is the "Adaptive Noise" (AN) in
+        # CEEMDAN: without it, the noise amplitude added at deep stages
+        # stays pinned to the original signal's std instead of tracking the
+        # (typically much smaller) residue, degrading high-order IMFs.
         white = self.rng.standard_normal((self.trials, N))
-        white = white * (self.noise_amp * sig_std)
 
         # --- Stage 1: first IMF ------------------------------------------
         imf1_components = []
         for i in range(self.trials):
-            imfs_i = self._emd_first_imf(sig + white[i])
+            imfs_i = self._emd_first_imf(sig + self.noise_amp * sig_std * white[i])
             imf1_components.append(imfs_i)
         imf1 = np.mean(imf1_components, axis=0)
 
-        imfs: List[np.ndarray] = [imf1]
+        imfs: list[np.ndarray] = [imf1]
         residue = sig - imf1
 
         # --- Stage 2..K: subsequent IMFs ---------------------------------
@@ -123,11 +127,15 @@ class CEEMDAN:
             if ek_noises is None:
                 break
 
+            # Adaptive rescale: noise amplitude tracks the current residue's
+            # std, not the original signal's.
+            beta_k = self.noise_amp * (float(np.std(residue)) + 1e-12)
+
             # Compute new ensemble of first-IMFs on residue + scaled noise
             next_imf_components = []
             for i in range(self.trials):
                 next_imf_components.append(
-                    self._emd_first_imf(residue + ek_noises[i])
+                    self._emd_first_imf(residue + beta_k * ek_noises[i])
                 )
             next_imf = np.mean(next_imf_components, axis=0)
 
@@ -139,7 +147,7 @@ class CEEMDAN:
         imfs.append(residue.copy())
         return imfs
 
-    def reconstruct(self, imfs: List[np.ndarray]) -> np.ndarray:
+    def reconstruct(self, imfs: list[np.ndarray]) -> np.ndarray:
         return np.sum(imfs, axis=0)
 
     # ------------------------------------------------------------------
@@ -163,7 +171,7 @@ class CEEMDAN:
             return out
         return first
 
-    def _kth_imf_of_noises(self, noises: np.ndarray, k: int) -> Optional[np.ndarray]:
+    def _kth_imf_of_noises(self, noises: np.ndarray, k: int) -> np.ndarray | None:
         """
         Return E_k(w_i) for every noise realisation.
 

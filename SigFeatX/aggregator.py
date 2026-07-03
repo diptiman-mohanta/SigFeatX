@@ -34,10 +34,12 @@ All original APIs (extract_all_features, run_pipeline) are UNCHANGED.
 """
 
 import warnings
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Any
+
+import numpy as np
+
 from ._progress import ProgressBar
 from ._validation import (
     validate_n_jobs,
@@ -47,22 +49,34 @@ from ._validation import (
     validate_signal_matrix,
     validate_unique_names,
 )
-from .preprocess import SignalPreprocessor
 from .decompose import (
-        FourierTransform, ShortTimeFourierTransform, WaveletDecomposer,
-        EMD, VMD, SVMD, EFD, LMD, JMD,
-        MODWT, CEEMDAN, HHT, SST,
-    )
-from .features.features import (
-        TimeDomainFeatures, FrequencyDomainFeatures,
-        EntropyFeatures, NonlinearFeatures, DecompositionFeatures,
-    )
-from .features.rqa import RQAFeatures
-from .features.mfdfa import MFDFAFeatures
+    CEEMDAN,
+    EFD,
+    EMD,
+    HHT,
+    JMD,
+    LMD,
+    MODWT,
+    SST,
+    SVMD,
+    VMD,
+    FourierTransform,
+    ShortTimeFourierTransform,
+    WaveletDecomposer,
+)
+from .decomposition_validator import DecompositionReport, DecompositionValidator
+from .feature_consistency import CrossMethodChecker, validate_feature_dict
 from .features.advanced_entropy import AdvancedEntropyFeatures
-from .decomposition_validator import DecompositionValidator, DecompositionReport
-from .feature_consistency import validate_feature_dict, CrossMethodChecker
-
+from .features.features import (
+    DecompositionFeatures,
+    EntropyFeatures,
+    FrequencyDomainFeatures,
+    NonlinearFeatures,
+    TimeDomainFeatures,
+)
+from .features.mfdfa import MFDFAFeatures
+from .features.rqa import RQAFeatures
+from .preprocess import SignalPreprocessor
 
 # ---------------------------------------------------------------------------
 # Pipeline metadata containers (unchanged)
@@ -71,7 +85,7 @@ from .feature_consistency import validate_feature_dict, CrossMethodChecker
 @dataclass
 class StageRecord:
     name: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
     input_shape: tuple
     output_shape: tuple
 
@@ -85,10 +99,10 @@ class StageRecord:
 @dataclass
 class PipelineMetadata:
     fs: float
-    window: Optional[str] = None
-    nperseg: Optional[int] = None
-    noverlap: Optional[int] = None
-    stages: List[StageRecord] = field(default_factory=list)
+    window: str | None = None
+    nperseg: int | None = None
+    noverlap: int | None = None
+    stages: list[StageRecord] = field(default_factory=list)
 
     def __str__(self):
         lines = [
@@ -120,10 +134,10 @@ class BatchResult:
     feature_names: list of feature column names.
     """
     dataframe: Any
-    errors: Dict[int, Exception]
+    errors: dict[int, Exception]
     n_success: int
     n_failed: int
-    feature_names: List[str]
+    feature_names: list[str]
 
     def __repr__(self):
         return (
@@ -164,8 +178,8 @@ class FeatureAggregator:
         self.nonlinear_features = NonlinearFeatures()
         self.decomp_features    = DecompositionFeatures()
 
-        self.last_quality_reports: Dict[str, DecompositionReport] = {}
-        self.last_consistency_report: Optional[str] = None
+        self.last_quality_reports: dict[str, DecompositionReport] = {}
+        self.last_consistency_report: str | None = None
 
     # ------------------------------------------------------------------
     # Preprocessing
@@ -200,18 +214,18 @@ class FeatureAggregator:
     def extract_all_features(
         self,
         signal: np.ndarray,
-        decomposition_methods: Optional[List[str]] = None,
+        decomposition_methods: list[str] | None = None,
         preprocess_signal: bool = True,
         extract_raw: bool = True,
         validate: bool = True,
         check_consistency: bool = True,
         **preprocess_kwargs,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         if decomposition_methods is None:
             decomposition_methods = ['fourier', 'dwt']
         signal = validate_signal_1d(signal, name='signal')
 
-        all_features: Dict[str, float] = {}
+        all_features: dict[str, float] = {}
         self.last_quality_reports = {}
 
         sig = self.preprocess(signal, **preprocess_kwargs) if preprocess_signal else signal.copy()
@@ -263,8 +277,8 @@ class FeatureAggregator:
 
     def extract_batch(
         self,
-        signals: Union[np.ndarray, List[np.ndarray]],
-        decomposition_methods: Optional[List[str]] = None,
+        signals: np.ndarray | list[np.ndarray],
+        decomposition_methods: list[str] | None = None,
         preprocess_signal: bool = True,
         validate: bool = False,
         check_consistency: bool = False,
@@ -290,8 +304,8 @@ class FeatureAggregator:
         """
         try:
             import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required for extract_batch(). pip install pandas")
+        except ImportError as exc:
+            raise ImportError("pandas is required for extract_batch(). pip install pandas") from exc
 
         if on_error not in {'warn', 'raise'}:
             raise ValueError(f"on_error must be 'warn' or 'raise'; got {on_error!r}.")
@@ -313,8 +327,8 @@ class FeatureAggregator:
             **preprocess_kwargs,
         )
 
-        results: Dict[int, Optional[Dict[str, float]]] = {}
-        errors:  Dict[int, Exception] = {}
+        results: dict[int, dict[str, float] | None] = {}
+        errors:  dict[int, Exception] = {}
 
         if n_signals == 0:
             df = pd.DataFrame()
@@ -368,10 +382,11 @@ class FeatureAggregator:
         if show_progress:
             print()
 
-        feature_names: List[str] = []
+        feature_names: list[str] = []
         for i in range(n_signals):
-            if results.get(i) is not None:
-                feature_names = list(results[i].keys())
+            res_i = results.get(i)
+            if res_i is not None:
+                feature_names = list(res_i.keys())
                 break
 
         rows = []
@@ -400,7 +415,7 @@ class FeatureAggregator:
         signal: np.ndarray,
         window_size: int,
         step_size: int,
-        decomposition_methods: Optional[List[str]] = None,
+        decomposition_methods: list[str] | None = None,
         preprocess_signal: bool = True,
         validate: bool = False,
         check_consistency: bool = False,
@@ -478,14 +493,14 @@ class FeatureAggregator:
     def extract_multichannel(
         self,
         signals_2d: np.ndarray,
-        channel_names: Optional[List[str]] = None,
-        decomposition_methods: Optional[List[str]] = None,
+        channel_names: list[str] | None = None,
+        decomposition_methods: list[str] | None = None,
         preprocess_signal: bool = True,
         validate: bool = False,
         include_cross: bool = True,
         n_jobs: int = 1,
         **preprocess_kwargs,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Extract features from a multi-channel signal.
 
@@ -505,7 +520,7 @@ class FeatureAggregator:
         signals_2d = validate_signal_matrix(signals_2d, name='signals_2d')
         n_jobs = validate_n_jobs(n_jobs)
 
-        n_channels, N = signals_2d.shape
+        n_channels, _N = signals_2d.shape
 
         if channel_names is None:
             channel_names = [f'ch{i}' for i in range(n_channels)]
@@ -523,7 +538,7 @@ class FeatureAggregator:
             **preprocess_kwargs,
         )
 
-        channel_features: Dict[str, Dict[str, float]] = {}
+        channel_features: dict[str, dict[str, float]] = {}
 
         if n_jobs == 1:
             for ch_idx, ch_name in enumerate(channel_names):
@@ -544,7 +559,7 @@ class FeatureAggregator:
                     raise outcome
                 channel_features[ch_name] = outcome
 
-        all_features: Dict[str, float] = {}
+        all_features: dict[str, float] = {}
         for ch_name, feats in channel_features.items():
             for k, v in feats.items():
                 all_features[f'{ch_name}_{k}'] = v
@@ -558,8 +573,8 @@ class FeatureAggregator:
     def _extract_cross_channel_features(
         self,
         signals_2d: np.ndarray,
-        channel_names: List[str],
-    ) -> Dict[str, float]:
+        channel_names: list[str],
+    ) -> dict[str, float]:
         """
         Pairwise cross-channel features for all channel pairs.
 
@@ -573,7 +588,7 @@ class FeatureAggregator:
         from scipy.signal import hilbert
 
         n_channels = len(channel_names)
-        features: Dict[str, float] = {}
+        features: dict[str, float] = {}
 
         for i in range(n_channels):
             for j in range(i + 1, n_channels):
@@ -620,10 +635,10 @@ class FeatureAggregator:
     def run_pipeline(
         self,
         signal: np.ndarray,
-        preprocess_params: Optional[Dict] = None,
-        decomposition_methods: Optional[List[str]] = None,
+        preprocess_params: dict | None = None,
+        decomposition_methods: list[str] | None = None,
         validate: bool = True,
-    ) -> Tuple[Dict[str, float], PipelineMetadata]:
+    ) -> tuple[dict[str, float], PipelineMetadata]:
         preprocess_params     = preprocess_params or {}
         decomposition_methods = decomposition_methods or ["fourier", "dwt"]
         signal = validate_signal_1d(signal, name='signal')
@@ -670,7 +685,7 @@ class FeatureAggregator:
                 sig, method, validate=validate)
             all_features.update(self._add_prefix(decomp_feats, method))
 
-            stage_params: Dict[str, Any] = {"method": method, "fs": self.fs}
+            stage_params: dict[str, Any] = {"method": method, "fs": self.fs}
             if method == "emd":
                 stage_params["max_imf"] = self.emd.max_imf
             if method == "vmd":
@@ -705,7 +720,7 @@ class FeatureAggregator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _extract_raw_features(self, sig: np.ndarray) -> Dict[str, float]:
+    def _extract_raw_features(self, sig: np.ndarray) -> dict[str, float]:
         features = {}
         features.update(self.time_features.extract(sig))
         features.update(self.freq_features.extract(sig, self.fs))
@@ -724,9 +739,9 @@ class FeatureAggregator:
         sig: np.ndarray,
         method: str,
         validate: bool = True,
-    ) -> Tuple[Dict[str, float], Optional[DecompositionReport]]:
-        features: Dict[str, float] = {}
-        quality_report: Optional[DecompositionReport] = None
+    ) -> tuple[dict[str, float], DecompositionReport | None]:
+        features: dict[str, float] = {}
+        quality_report: DecompositionReport | None = None
 
         if method == 'fourier':
             freqs, magnitude = self.ft.transform(sig)
@@ -734,7 +749,7 @@ class FeatureAggregator:
             features['mean_magnitude'] = np.mean(magnitude)
             features['std_magnitude']  = np.std(magnitude)
         elif method == 'stft':
-            f, t, Zxx = self.stft.transform(sig)
+            _f, _t, Zxx = self.stft.transform(sig)
             features['mean_power'] = np.mean(Zxx ** 2)
             features['std_power']  = np.std(Zxx ** 2)
             features['max_power']  = np.max(Zxx ** 2)
@@ -781,7 +796,7 @@ class FeatureAggregator:
             modes, jump = self.jmd.decompose(sig)
             modes_list  = [modes[i] for i in range(len(modes))]
             # Treat the jump as an extra component so feature extraction covers it.
-            all_components = modes_list + [jump]
+            all_components = [*modes_list, jump]
             features.update(self.decomp_features.extract_from_components(all_components, 'jmd'))
             # Jump-specific summary features
             features['jmd_jump_energy']  = float(np.sum(jump ** 2))
@@ -810,7 +825,7 @@ class FeatureAggregator:
                 "Valid: 'fourier','stft','dwt','wpd','emd','vmd','svmd','efd',"
                 "'lmd','jmd','modwt','ceemdan','hht','sst'."
             )
-        
+
         violations = validate_feature_dict(features, method=method)
         for v in violations:
             warnings.warn(str(v), RuntimeWarning, stacklevel=3)
@@ -818,12 +833,12 @@ class FeatureAggregator:
         return features, quality_report
 
     @staticmethod
-    def _add_prefix(features: Dict[str, float], prefix: str) -> Dict[str, float]:
+    def _add_prefix(features: dict[str, float], prefix: str) -> dict[str, float]:
         return {f'{prefix}_{k}': v for k, v in features.items()}
 
     def get_feature_names(
-        self, decomposition_methods: Optional[List[str]] = None
-    ) -> List[str]:
+        self, decomposition_methods: list[str] | None = None
+    ) -> list[str]:
         if decomposition_methods is None:
             decomposition_methods = ['fourier', 'dwt']
         dummy = np.random.randn(1000)
@@ -845,21 +860,21 @@ def _worker_extract(
     sig: np.ndarray,
     fs: float,
     extract_kwargs: dict,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Worker for parallel batch and multi-channel extraction."""
     agg = FeatureAggregator(fs=fs)
     return agg.extract_all_features(sig, **extract_kwargs)
 
 
 def _run_parallel_extract(
-    tasks: Dict[Any, np.ndarray],
+    tasks: dict[Any, np.ndarray],
     *,
     fs: float,
     extract_kwargs: dict,
     max_workers: int,
     show_progress: bool = False,
-    total: Optional[int] = None,
-) -> Dict[Any, Union[Dict[str, float], Exception]]:
+    total: int | None = None,
+) -> dict[Any, dict[str, float] | Exception]:
     """Run extraction tasks with a process pool, falling back to threads if needed."""
     total = len(tasks) if total is None else total
 
@@ -882,7 +897,7 @@ def _run_parallel_extract(
 
     try:
         return _execute(ProcessPoolExecutor)
-    except (OSError, PermissionError) as exc:
+    except (OSError, PermissionError):
         warnings.warn(
             "[SigFeatX] Process-based parallelism is unavailable in this environment; "
             "falling back to threads.",
@@ -892,7 +907,7 @@ def _run_parallel_extract(
         return _execute(ThreadPoolExecutor)
 
 def _count_jump_steps(jump: np.ndarray, threshold_ratio: float = 0.1) -> int:
-    """      
+    """
       Count significant step-changes in the extracted jump component
         A step is any point where |jump'[i]| > threshold_ratio * max|jump'|.
         Returns an integer count stored as float for compatibility with the

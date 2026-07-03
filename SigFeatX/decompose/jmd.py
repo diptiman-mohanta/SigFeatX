@@ -17,7 +17,7 @@ Key design decisions from the reference:
   3. ifftshift before ifft for reconstruction (same as VMD reference).
   4. MC proximal operator matches the reference's _max/_min clipping:
        x = clip(clip(1/(1-mu*b) - mu*sqrt(2b)/((1-mu*b)*|h|), 0, None), None, 1) * h
-  5. v update: linalg.solve (dense). D is a T×T forward-difference matrix
+  5. v update: linalg.solve (dense). D is a T x T forward-difference matrix
      with zero last row (NOT scipy sparse, matching the MATLAB reference).
   6. Lagrangian update for rho: rho = rho - gamma*(x - Dv)
      (subtraction, not addition — matches the MATLAB sign convention).
@@ -25,9 +25,9 @@ Key design decisions from the reference:
   8. De-mirroring: same as VMD — keep u[:, T//4 : 3*T//4].
 """
 
+
 import numpy as np
 from numpy import linalg
-from typing import Tuple, Union, Optional
 
 from SigFeatX._validation import validate_signal_1d
 
@@ -87,7 +87,7 @@ class JMD:
     # Public API
     # ------------------------------------------------------------------
 
-    def decompose(self, sig: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def decompose(self, sig: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Decompose signal into K AM-FM modes + jump component.
 
@@ -105,7 +105,7 @@ class JMD:
         self,
         sig: np.ndarray,
         return_all: bool = True,
-    ) -> Union[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | np.ndarray:
         """
         Decompose signal.
 
@@ -224,8 +224,8 @@ class JMD:
                 (1.0 / (1.0 - mu * b)) * np.ones_like(abs_h)
                 - (mu * np.sqrt(2.0 * b) / (1.0 - mu * b)) / safe_abs_h
             )
-            inner_clamped = np.clip(inner, 0.0, None)   # max(·, 0)
-            x = np.clip(inner_clamped, None, 1.0) * h   # min(·, 1) × h
+            inner_clamped = np.clip(inner, 0.0, None)   # max(., 0)
+            x = np.clip(inner_clamped, None, 1.0) * h   # min(., 1) x h
 
             # Dual update for rho (reference: subtract, not add)
             rho = rho - gamma * (x - Dv)
@@ -324,7 +324,7 @@ class JMD:
         # Jump signal (time domain)
         v = np.zeros(T)
 
-        # First-difference matrix D: T×T, last row = 0
+        # First-difference matrix D: T x T, last row = 0
         d = np.ones(T)
         D = np.diag(-d, 0) + np.diag(d[:-1], 1)
         D = D.astype(float)

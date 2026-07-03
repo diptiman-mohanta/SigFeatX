@@ -29,9 +29,9 @@ Key design decisions from the reference:
 """
 
 import warnings
+
 import numpy as np
 from scipy.signal import argrelextrema
-from typing import List, Optional, Tuple
 
 from SigFeatX._validation import validate_signal_1d
 
@@ -90,7 +90,7 @@ class LMD:
     # Public API
     # ------------------------------------------------------------------
 
-    def decompose(self, sig: np.ndarray) -> List[np.ndarray]:
+    def decompose(self, sig: np.ndarray) -> list[np.ndarray]:
         """
         Decompose signal into Product Functions (PFs).
 
@@ -112,7 +112,7 @@ class LMD:
         if np.allclose(sig, sig[0]):
             return sig.reshape(1, -1)
 
-        pf      = []
+        pf: list[np.ndarray] = []
         residue = sig.copy().astype(float)
 
         while (len(pf) < self.max_pf) and (not self._is_monotonic(residue)):
@@ -131,18 +131,18 @@ class LMD:
         pf.append(residue)
         return np.array(pf)
 
-    def reconstruct(self, pfs: List[np.ndarray]) -> np.ndarray:
+    def reconstruct(self, pfs: list[np.ndarray]) -> np.ndarray:
         return np.sum(pfs, axis=0)
 
     # ------------------------------------------------------------------
     # Core sifting
     # ------------------------------------------------------------------
 
-    def _extract_product_function(self, sig: np.ndarray) -> Optional[np.ndarray]:
+    def _extract_product_function(self, sig: np.ndarray) -> np.ndarray | None:
         """Extract one PF via iterative envelope sifting."""
         s = sig.copy()
         n = len(sig)
-        envelopes: List[np.ndarray] = []
+        envelopes: list[np.ndarray] = []
 
         for _ in range(self.max_envelope_iter):
             extrema = self._find_extrema(s)
@@ -183,7 +183,7 @@ class LMD:
             envelopes.append(a_clamped)
             s = t
 
-        # PF = product of all accumulated envelopes × final FM signal
+        # PF = product of all accumulated envelopes x final FM signal
         component = s.copy()
         for e in envelopes:
             component = component * e
@@ -199,7 +199,7 @@ class LMD:
 
     def _local_mean_and_envelope(
         self, sig: np.ndarray, extrema: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute raw and smoothed local mean m(t) and envelope a(t).
 

@@ -1,13 +1,15 @@
-import numpy as np
 import sys
+
+import numpy as np
+
 sys.path.insert(0, '..')
 
 from SigFeatX import FeatureAggregator, SignalIO
 
 # Generate sample signal
 t = np.linspace(0, 1, 1000)
-signal = (np.sin(2 * np.pi * 5 * t) + 
-          0.5 * np.sin(2 * np.pi * 10 * t) + 
+signal = (np.sin(2 * np.pi * 5 * t) +
+          0.5 * np.sin(2 * np.pi * 10 * t) +
           0.1 * np.random.randn(1000))
 
 # Initialize feature extractor

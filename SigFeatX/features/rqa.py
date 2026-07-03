@@ -21,7 +21,6 @@ time-delay embedding of the signal, then extracts:
   DIV   — Divergence (1 / L_max)
 """
 
-from typing import Dict
 
 import numpy as np
 
@@ -80,12 +79,17 @@ class RQAFeatures:
 
     @staticmethod
     def _diagonal_line_lengths(R: np.ndarray, l_min: int = 2) -> np.ndarray:
-        """All diagonal line lengths >= l_min (excluding the main diagonal)."""
+        """All diagonal line lengths >= l_min (excluding the main diagonal).
+
+        Scans both the upper and lower triangle. R is symmetric by
+        construction (distance-based recurrence), so restricting to one
+        triangle would silently halve the point count DET normalises by.
+        """
         N = R.shape[0]
         lengths = []
         for offset in range(1, N):
-            diag = np.diag(R, k=offset)
-            lengths.extend(RQAFeatures._runs_of_ones(diag, l_min))
+            lengths.extend(RQAFeatures._runs_of_ones(np.diag(R, k=offset), l_min))
+            lengths.extend(RQAFeatures._runs_of_ones(np.diag(R, k=-offset), l_min))
         return np.asarray(lengths, dtype=int)
 
     @staticmethod
@@ -124,10 +128,10 @@ class RQAFeatures:
         sig: np.ndarray,
         m: int = 3,
         tau: int = 1,
-        eps: float = None,
+        eps: float | None = None,
         l_min: int = 2,
         v_min: int = 2,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Compute RQA features.
 

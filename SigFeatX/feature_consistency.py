@@ -1,8 +1,7 @@
 import warnings
-import numpy as np
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # 1.  Feature contracts
@@ -43,7 +42,7 @@ class ContractViolation:
 #   kurtosis < -10 would imply a platykurtic distribution flatter than
 #   any real physical signal).
 
-_CONTRACTS: Dict[str, Tuple] = {
+_CONTRACTS: dict[str, tuple] = {
     # ── Time domain ─────────────────────────────────────────────────────────
     "rms":                  (0.0,   None,  False),
     "energy":               (0.0,   None,  False),
@@ -109,10 +108,10 @@ _CONTRACTS: Dict[str, Tuple] = {
 
 
 def validate_feature_dict(
-    features: Dict[str, float],
+    features: dict[str, float],
     method: str = "unknown",
     raise_on_violation: bool = False,
-) -> List[ContractViolation]:
+) -> list[ContractViolation]:
     """
     Check every feature value in `features` against known mathematical contracts.
 
@@ -184,7 +183,7 @@ def validate_feature_dict(
 @dataclass
 class MethodComparison:
     feature: str
-    values: Dict[str, float]
+    values: dict[str, float]
     relative_spread: float
     consistent: bool
     note: str
@@ -220,12 +219,12 @@ class CrossMethodChecker:
                     as inconsistent. Default 0.3 = 30% spread.
         """
         self.tolerance = tolerance
-        self._registry: Dict[str, Dict[str, float]] = {}
+        self._registry: dict[str, dict[str, float]] = {}
 
     def add_from_aggregator_output(
         self,
         method_tag: str,
-        all_features: Dict[str, float],
+        all_features: dict[str, float],
         prefix: str,
     ):
         """
@@ -244,14 +243,14 @@ class CrossMethodChecker:
                 subset[bare] = v
         self._registry[method_tag] = subset
 
-    def add_raw(self, method_tag: str, features: Dict[str, float]):
+    def add_raw(self, method_tag: str, features: dict[str, float]):
         """Register a flat feature dict directly (no prefix stripping)."""
         self._registry[method_tag] = features
 
     def compare(
         self,
-        features: Optional[List[str]] = None,
-    ) -> List[MethodComparison]:
+        features: list[str] | None = None,
+    ) -> list[MethodComparison]:
         """
         Compare registered methods on the requested features.
 
@@ -314,7 +313,7 @@ class CrossMethodChecker:
 
         return results
 
-    def report(self, features: Optional[List[str]] = None) -> str:
+    def report(self, features: list[str] | None = None) -> str:
         comparisons = self.compare(features)
         n_fail = sum(1 for c in comparisons if not c.consistent)
         header = (

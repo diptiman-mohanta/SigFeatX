@@ -1,7 +1,6 @@
 import numpy as np
-from scipy import signal as scipy_signal
 
-from SigFeatX.features.features import TimeDomainFeatures, FrequencyDomainFeatures
+from SigFeatX.features.features import FrequencyDomainFeatures, TimeDomainFeatures
 
 
 def _make_sine(amplitude: float = 3.0, frequency_hz: float = 50.0, fs: int = 1000, duration_s: float = 1.0) -> np.ndarray:

@@ -23,7 +23,6 @@ where W_j are the wavelet (detail) coefficients at level j and V_J is the
 smooth (approximation) at the deepest level. All arrays have length N.
 """
 
-from typing import List
 
 import numpy as np
 import pywt
@@ -50,7 +49,7 @@ class MODWT:
     directly and applies the rescaling explicitly.
     """
 
-    def __init__(self, wavelet: str = 'db4', level: int = None):
+    def __init__(self, wavelet: str = 'db4', level: int | None = None):
         self.wavelet = wavelet
         self.level = level
 
@@ -58,7 +57,7 @@ class MODWT:
     # Forward transform
     # ------------------------------------------------------------------
 
-    def decompose(self, sig: np.ndarray) -> List[np.ndarray]:
+    def decompose(self, sig: np.ndarray) -> list[np.ndarray]:
         """
         Run the forward MODWT.
 
@@ -86,7 +85,7 @@ class MODWT:
         h = np.asarray(w.dec_hi) / np.sqrt(2.0)   # wavelet (high-pass)
         g = np.asarray(w.dec_lo) / np.sqrt(2.0)   # scaling (low-pass)
 
-        coeffs: List[np.ndarray] = []
+        coeffs: list[np.ndarray] = []
         v_prev = sig.astype(float).copy()         # V_0 = signal
 
         for j in range(1, level + 1):
@@ -101,7 +100,7 @@ class MODWT:
     # Inverse transform
     # ------------------------------------------------------------------
 
-    def reconstruct(self, coeffs: List[np.ndarray]) -> np.ndarray:
+    def reconstruct(self, coeffs: list[np.ndarray]) -> np.ndarray:
         """
         Run the inverse MODWT.
 
@@ -156,10 +155,10 @@ class MODWT:
         for t in range(N):
             acc_w = 0.0
             acc_v = 0.0
-            for l in range(L):
-                idx = (t - scale * l) % N      # circular shift
-                acc_w += h[l] * v_prev[idx]
-                acc_v += g[l] * v_prev[idx]
+            for tap in range(L):
+                idx = (t - scale * tap) % N      # circular shift
+                acc_w += h[tap] * v_prev[idx]
+                acc_v += g[tap] * v_prev[idx]
             w_j[t] = acc_w
             v_j[t] = acc_v
 
@@ -179,8 +178,8 @@ class MODWT:
         v_prev = np.zeros(N, dtype=float)
         for t in range(N):
             acc = 0.0
-            for l in range(L):
-                idx = (t + scale * l) % N      # forward shift (transpose)
-                acc += h[l] * w_j[idx] + g[l] * v_j[idx]
+            for tap in range(L):
+                idx = (t + scale * tap) % N      # forward shift (transpose)
+                acc += h[tap] * w_j[idx] + g[tap] * v_j[idx]
             v_prev[t] = acc
         return v_prev

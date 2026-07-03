@@ -30,7 +30,6 @@ Input shape
 """
 
 import warnings
-from typing import List, Optional, Union
 
 import numpy as np
 
@@ -85,16 +84,16 @@ class SigFeatXTransformer(BaseEstimator, TransformerMixin):
     def __init__(
         self,
         fs: float = 1.0,
-        decomposition_methods: Optional[List[str]] = None,
+        decomposition_methods: list[str] | None = None,
         preprocess_signal: bool = True,
         extract_raw: bool = True,
         validate: bool = False,
         check_consistency: bool = False,
         n_jobs: int = 1,
         on_error: str = 'warn',
-        channel_names: Optional[List[str]] = None,
+        channel_names: list[str] | None = None,
         include_cross_channel: bool = True,
-        preprocess_kwargs: Optional[dict] = None,
+        preprocess_kwargs: dict | None = None,
     ):
         if not SKLEARN_AVAILABLE:
             raise ImportError(
@@ -213,7 +212,7 @@ class SigFeatXTransformer(BaseEstimator, TransformerMixin):
         self,
         X: np.ndarray,
         agg: FeatureAggregator,
-        decomp: List[str],
+        decomp: list[str],
         preprocess_kwargs: dict,
     ) -> np.ndarray:
         """Handle (n_signals, n_channels, signal_length) input."""
@@ -229,8 +228,8 @@ class SigFeatXTransformer(BaseEstimator, TransformerMixin):
                     f"n_channels {n_channels}."
                 )
 
-        rows = []
-        feature_names: Optional[List[str]] = None
+        rows: list[list[float] | None] = []
+        feature_names: list[str] | None = None
 
         for i in range(n_signals):
             try:

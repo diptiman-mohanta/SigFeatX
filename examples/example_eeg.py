@@ -3,17 +3,16 @@ EEG Signal Analysis Script
 Load, clean, decompose using VMD (K=7), and extract features from EEG data
 """
 
+import sys
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-import sys
-import seaborn as sns
 
 # Add SigFeatX to path
 sys.path.insert(0, r'D:\SigFeatX')
 
-from SigFeatX.aggregator import FeatureAggregator, SignalPreprocessor
+from SigFeatX.aggregator import SignalPreprocessor
 from SigFeatX.decompose import VMD
 from SigFeatX.features.features import TimeDomainFeatures
 
@@ -30,12 +29,12 @@ try:
     df = pd.read_csv(filepath)
     print(f"   Loaded CSV with shape: {df.shape}")
     print(f"   Columns: {df.columns.tolist()}")
-    
+
     # Get the first column as signal
     signal = df.iloc[:, 0].values
     print(f"   Signal length: {len(signal)}")
     print(f"   Signal range: [{np.min(signal):.4f}, {np.max(signal):.4f}]")
-    
+
 except Exception as e:
     print(f"   Error loading file: {e}")
     sys.exit(1)
@@ -45,14 +44,14 @@ print("\n2. Cleaning signal...")
 preprocessor = SignalPreprocessor()
 
 signal_detrended = preprocessor.detrend(signal, method='linear')
-print(f"   ✓ Detrended signal")
+print("   ✓ Detrended signal")
 
-signal_clean = preprocessor.denoise(signal_detrended, method='wavelet', 
+signal_clean = preprocessor.denoise(signal_detrended, method='wavelet',
                                    wavelet='db4', level=3, mode='soft')
-print(f"   ✓ Denoised signal (wavelet db4, level 3)")
+print("   ✓ Denoised signal (wavelet db4, level 3)")
 
 signal_clean = preprocessor.normalize(signal_clean, method='zscore')
-print(f"   ✓ Normalized signal (z-score)")
+print("   ✓ Normalized signal (z-score)")
 
 # Step 3: Decompose using VMD with K=7
 print("\n3. Decomposing signal using VMD (K=7)...")
@@ -114,7 +113,7 @@ ax2.grid(True, alpha=0.3)
 
 ax3 = plt.subplot(2, 2, 3)
 ax3.plot(time_clean, signal_clean, 'g-', linewidth=0.5, alpha=0.7)
-ax3.set_title('Preprocessed Signal (Detrended → Denoised → Normalized)', 
+ax3.set_title('Preprocessed Signal (Detrended → Denoised → Normalized)',
               fontsize=13, fontweight='bold')
 ax3.set_xlabel('Time (s)', fontsize=11)
 ax3.set_ylabel('Normalized Amplitude', fontsize=11)
@@ -131,7 +130,7 @@ ax4.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.savefig('EEG_Raw_Clean_Signals.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved raw/clean signals to: EEG_Raw_Clean_Signals.png")
+print("   ✓ Saved raw/clean signals to: EEG_Raw_Clean_Signals.png")
 
 # Figure 2: VMD Decomposed Modes (K=7)
 fig2 = plt.figure(figsize=(16, 14))
@@ -146,24 +145,24 @@ for i in range(7):
     ax.set_ylabel('Amplitude', fontsize=10)
     ax.grid(True, alpha=0.3)
     ax.set_xlim([0, time_modes[-1]])
-    
+
     energy = np.sum(modes[i]**2)
     rms = np.sqrt(np.mean(modes[i]**2))
     mean_val = np.mean(modes[i])
     std_val = np.std(modes[i])
-    
+
     info_text = f'Energy: {energy:.2f}\nRMS: {rms:.4f}\nMean: {mean_val:.4f}\nStd: {std_val:.4f}'
     ax.text(0.99, 0.97, info_text,
             transform=ax.transAxes, fontsize=9,
             verticalalignment='top', horizontalalignment='right',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
-    
+
     if i == 6:
         ax.set_xlabel('Time (s)', fontsize=11)
 
 plt.tight_layout()
 plt.savefig('EEG_VMD_Decomposed_Modes.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved VMD modes to: EEG_VMD_Decomposed_Modes.png")
+print("   ✓ Saved VMD modes to: EEG_VMD_Decomposed_Modes.png")
 
 # Figure 3: Frequency Spectra - Raw and Clean
 fig3 = plt.figure(figsize=(14, 5))
@@ -173,26 +172,26 @@ def plot_spectrum(ax, signal_data, title, color='blue', fs=128):
     n = len(signal_data)
     fft_vals = fft(signal_data)
     freqs = fftfreq(n, 1/fs)
-    
+
     pos_mask = freqs > 0
     freqs_pos = freqs[pos_mask]
     magnitude = np.abs(fft_vals[pos_mask])
-    
+
     freq_limit = 60
     freq_mask = freqs_pos <= freq_limit
-    
+
     ax.plot(freqs_pos[freq_mask], magnitude[freq_mask], color=color, linewidth=1.2)
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.set_ylabel('Magnitude', fontsize=10)
     ax.grid(True, alpha=0.3)
     ax.set_xlim([0, freq_limit])
-    
-    bands = {'Delta': (0.5, 4), 'Theta': (4, 8), 'Alpha': (8, 13), 
+
+    bands = {'Delta': (0.5, 4), 'Theta': (4, 8), 'Alpha': (8, 13),
              'Beta': (13, 30), 'Gamma': (30, 60)}
     y_max = ax.get_ylim()[1]
     for band_name, (low, high) in bands.items():
         ax.axvspan(low, high, alpha=0.1, color='gray')
-        ax.text((low + high) / 2, y_max * 0.95, band_name, 
+        ax.text((low + high) / 2, y_max * 0.95, band_name,
                 fontsize=8, ha='center', va='top')
 
 ax1 = plt.subplot(1, 2, 1)
@@ -205,7 +204,7 @@ ax2.set_xlabel('Frequency (Hz)', fontsize=10)
 
 plt.tight_layout()
 plt.savefig('EEG_Signal_Spectra.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved signal spectra to: EEG_Signal_Spectra.png")
+print("   ✓ Saved signal spectra to: EEG_Signal_Spectra.png")
 
 # Figure 4: VMD Modes Frequency Spectra
 fig4 = plt.figure(figsize=(16, 12))
@@ -222,7 +221,7 @@ if len(fig4.axes) > 7:
 
 plt.tight_layout()
 plt.savefig('EEG_VMD_Mode_Spectra.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved VMD mode spectra to: EEG_VMD_Mode_Spectra.png")
+print("   ✓ Saved VMD mode spectra to: EEG_VMD_Mode_Spectra.png")
 
 # Step 6: Save features
 print("\n6. Saving features to CSV...")
@@ -240,7 +239,7 @@ features_df = pd.DataFrame({
 })
 
 features_df.to_csv('EEG_VMD_Features.csv', index=False)
-print(f"   ✓ Saved features to: EEG_VMD_Features.csv")
+print("   ✓ Saved features to: EEG_VMD_Features.csv")
 
 # Step 7: Create Feature Matrix Visualization
 print("\n7. Creating feature matrix visualization...")
@@ -289,10 +288,10 @@ cbar.set_label('Normalized Feature Value', rotation=270, labelpad=20, fontsize=1
 for i in range(len(feature_names)):
     for j in range(len(column_labels)):
         text = ax.text(j, i, f'{feature_matrix[i, j]:.3f}',
-                      ha="center", va="center", color="black", fontsize=9, 
+                      ha="center", va="center", color="black", fontsize=9,
                       fontweight='bold')
 
-ax.set_title('EEG Feature Matrix Heatmap (VMD K=7)\nNormalized by Feature Row', 
+ax.set_title('EEG Feature Matrix Heatmap (VMD K=7)\nNormalized by Feature Row',
              fontsize=14, fontweight='bold', pad=20)
 ax.set_xlabel('Signal Components', fontsize=12, fontweight='bold')
 ax.set_ylabel('Statistical Features', fontsize=12, fontweight='bold')
@@ -304,7 +303,7 @@ ax.grid(which="minor", color="white", linestyle='-', linewidth=2)
 
 plt.tight_layout()
 plt.savefig('EEG_Feature_Matrix.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved feature matrix to: EEG_Feature_Matrix.png")
+print("   ✓ Saved feature matrix to: EEG_Feature_Matrix.png")
 
 # Create second feature matrix with raw values
 fig6 = plt.figure(figsize=(14, 8))
@@ -325,7 +324,7 @@ for i, feature in enumerate(feature_names):
 
 ax2.set_xlabel('Signal Components', fontsize=12, fontweight='bold')
 ax2.set_ylabel('Feature Value', fontsize=12, fontweight='bold')
-ax2.set_title('EEG Feature Matrix - Bar Chart Comparison (VMD K=7)', 
+ax2.set_title('EEG Feature Matrix - Bar Chart Comparison (VMD K=7)',
               fontsize=14, fontweight='bold')
 ax2.set_xticks(x + width * 2)
 ax2.set_xticklabels(column_labels, fontsize=11)
@@ -334,7 +333,7 @@ ax2.grid(True, alpha=0.3, axis='y')
 
 plt.tight_layout()
 plt.savefig('EEG_Feature_Matrix_BarChart.png', dpi=300, bbox_inches='tight')
-print(f"   ✓ Saved feature matrix bar chart to: EEG_Feature_Matrix_BarChart.png")
+print("   ✓ Saved feature matrix bar chart to: EEG_Feature_Matrix_BarChart.png")
 
 # Summary
 print("\n" + "=" * 80)
@@ -354,7 +353,7 @@ print("  Analyzing: EEG.AF3 (Left frontal channel)")
 print("  Sample rate: 128 Hz")
 print(f"  Duration: {len(signal)/128:.2f} seconds")
 print(f"  Total samples: {len(signal)}")
-print(f"  VMD Modes: 7")
+print("  VMD Modes: 7")
 print("\n" + "=" * 80)
 print("\nFeature Summary Table:")
 print(features_df.to_string(index=False))

@@ -4,6 +4,48 @@ All notable changes to SigFeatX are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **RQA `DET`** (`SigFeatX.features.RQAFeatures`) was silently deflated by
+  exactly 2x: `_diagonal_line_lengths` only scanned the upper triangle of
+  the (symmetric) recurrence matrix, while the `DET` denominator counted
+  points from both triangles. Now scans both triangles. `L`, `L_max`,
+  `TT`, `ENTR` were unaffected (symmetric distributions).
+- **CEEMDAN** (`SigFeatX.decompose.CEEMDAN`) was missing the "Adaptive
+  Noise" the algorithm is named for: noise amplitude was fixed to the
+  *original* signal's std for every stage instead of being rescaled to
+  the *current residue's* std (Torres et al. 2011). Deep IMFs on signals
+  with fast-decaying residues were degraded as a result.
+- **Bubble Entropy** (`SigFeatX.features.AdvancedEntropyFeatures.bubble_entropy`)
+  used a plain Shannon-entropy difference instead of the paper's Renyi
+  entropy of order 2, and was missing the `log((m+1)/(m-1))` normalisation
+  (Manis et al. 2017, matches EntropyHub's reference implementation).
+- **`SigFeatX.__version__`** reported `"0.2.0"` even though the package
+  had shipped `0.3.0` (per `pyproject.toml`/git tags) since the Phase 2
+  release. Now kept in sync.
+- Test `test_noise_spectral_flatness_high` asserted `spectral_flatness >
+  0.7` for white noise; the mathematically correct expectation for a
+  single (non-Welch-averaged) periodogram is `exp(-euler_gamma) ≈ 0.56`,
+  not close to 1. Lowered to `> 0.5`, matching the threshold already used
+  for the same computation in `test_bug_fixes.py`.
+
+### Internal
+- Added CI (`.github/workflows/ci.yml`): test matrix across Python
+  3.11–3.13 (+ Windows), `ruff check`, `mypy`, and a package-build check
+  on every push/PR. Added `.github/workflows/release.yml` to build and
+  publish to PyPI via trusted publishing on `v*.*.*` tags. Added
+  Dependabot for pip and GitHub Actions.
+- Modernised all `typing.List/Dict/Tuple/Optional/Union` to PEP
+  585/604 (`list`, `dict`, `X | None`, ...) and brought the codebase to a
+  clean `ruff check` / `mypy` under the existing `pyproject.toml` config.
+- Removed `requirements.txt` (redundant with `pyproject.toml`, which has
+  been the single source of truth for dependencies since 0.2.0). Bumped
+  the dependency floors to the oldest versions that actually ship
+  `py311` wheels (`numpy>=1.24`, `scipy>=1.10`, `PyWavelets>=1.4`,
+  `pandas>=1.5.3`), since the old floors predated `requires-python
+  >=3.11` and were never actually installable.
+
 ## [0.3.0] — 2026-05-23
 
 ### Added

@@ -1,8 +1,8 @@
 import numpy as np
 
 from SigFeatX.features.features import (
-    TimeDomainFeatures,
     FrequencyDomainFeatures,
+    TimeDomainFeatures,
 )
 
 
@@ -41,12 +41,20 @@ def test_noise_std_near_unity():
 
 
 def test_noise_spectral_flatness_high():
-    """White noise has a flat spectrum, so spectral flatness should be high."""
+    """White noise has a flat spectrum, so spectral flatness should be high.
+
+    Note: spectral_flatness here is Wiener's SFM on a *single* periodogram
+    (no Welch averaging), whose ordinates for white noise are exponentially
+    distributed rather than constant. Its expectation is exp(-euler_gamma)
+    approx 0.5615 (geometric/arithmetic mean of i.i.d. Exp(1) variables),
+    not close to 1 -- see test_bug_fixes.py::TestSpectralFlatness for the
+    same threshold used against the same computation.
+    """
     sig = _make_white_noise()
     fd = FrequencyDomainFeatures.extract(sig, fs=1000)
 
     assert "spectral_flatness" in fd, "Frequency-domain key missing: spectral_flatness"
-    assert fd["spectral_flatness"] > 0.7
+    assert fd["spectral_flatness"] > 0.5
 
 
 def test_noise_spectral_entropy_high():

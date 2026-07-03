@@ -7,13 +7,15 @@ The successive strategy extracts K=1 mode at a time from the residual.
 
 Changes from previous version:
   - tol default changed from 1e-7 to 0.01 (energy ratio criterion):
-    stop when residual energy < tol × original energy.
+    stop when residual energy < tol x original energy.
   - Inherits VMD's mirror extension and correct amplitude reconstruction.
 """
 
 import numpy as np
-from .vmd import VMD
+
 from SigFeatX._validation import validate_signal_1d
+
+from .vmd import VMD
 
 
 class SVMD:

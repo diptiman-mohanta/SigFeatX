@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import chirp
 
-from SigFeatX.decompose import WaveletDecomposer, EMD
+from SigFeatX.decompose import EMD, WaveletDecomposer
 
 
 def _make_sine(

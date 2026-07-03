@@ -1,7 +1,7 @@
+
 import numpy as np
-from scipy import stats, signal
+from scipy import stats
 from scipy.fft import fft, fftfreq
-from typing import Dict, List, Optional, Tuple
 
 from SigFeatX._validation import validate_sampling_rate, validate_signal_1d
 from SigFeatX.utils import SignalUtils
@@ -11,7 +11,7 @@ class TimeDomainFeatures:
     """Extract time domain statistical features."""
 
     @staticmethod
-    def extract(sig: np.ndarray) -> Dict[str, float]:
+    def extract(sig: np.ndarray) -> dict[str, float]:
         sig = validate_signal_1d(sig, name='sig')
         features = {}
         features['mean']             = np.mean(sig)
@@ -69,7 +69,7 @@ class TimeDomainFeatures:
         return sig[1:-1] ** 2 - sig[:-2] * sig[2:]
 
     @staticmethod
-    def _autocorrelation_peak(sig: np.ndarray) -> Tuple[float, float]:
+    def _autocorrelation_peak(sig: np.ndarray) -> tuple[float, float]:
         if len(sig) < 3:
             return 0.0, 0.0
         centered = sig - np.mean(sig)
@@ -89,7 +89,7 @@ class FrequencyDomainFeatures:
     """Extract frequency domain features."""
 
     @staticmethod
-    def extract(sig: np.ndarray, fs: float = 1.0) -> Dict[str, float]:
+    def extract(sig: np.ndarray, fs: float = 1.0) -> dict[str, float]:
         sig = validate_signal_1d(sig, name='sig')
         fs  = validate_sampling_rate(fs)
         features = {}
@@ -183,7 +183,7 @@ class FrequencyDomainFeatures:
         fs: float,
         edge_fraction: float = 0.02,
         amplitude_threshold_ratio: float = 0.05,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         if len(sig) < 4 or not np.all(np.isfinite(sig)) or np.allclose(sig, sig[0]):
             return 0.0, 0.0
 
@@ -228,7 +228,7 @@ class FrequencyDomainFeatures:
         return float(slope)
 
     @staticmethod
-    def _eeg_bandpowers(freqs: np.ndarray, power: np.ndarray, fs: float) -> Dict[str, float]:
+    def _eeg_bandpowers(freqs: np.ndarray, power: np.ndarray, fs: float) -> dict[str, float]:
         nyquist = fs / 2.0
         bands   = {
             'delta': (0.5,  4.0),
@@ -238,7 +238,7 @@ class FrequencyDomainFeatures:
             'gamma': (30.0, 100.0),
         }
         total_pos_power = np.sum(power)
-        out: Dict[str, float] = {}
+        out: dict[str, float] = {}
         for name, (low, high) in bands.items():
             lo = max(0.0, low)
             hi = min(nyquist, high)
@@ -274,7 +274,7 @@ class EntropyFeatures:
     """Extract entropy-based features."""
 
     @staticmethod
-    def extract(sig: np.ndarray) -> Dict[str, float]:
+    def extract(sig: np.ndarray) -> dict[str, float]:
         sig = validate_signal_1d(sig, name='sig')
         return {
             'shannon_entropy'     : EntropyFeatures._shannon_entropy(sig),
@@ -305,7 +305,7 @@ class EntropyFeatures:
         return float(-np.sum(prob * np.log2(prob)))
 
     @staticmethod
-    def _sample_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
+    def _sample_entropy(sig: np.ndarray, m: int = 2, r: float | None = None) -> float:
         """
         Sample Entropy (Richman & Moorman 2000).
         Vectorised implementation — self-matches excluded (i≠j) per the paper.
@@ -349,7 +349,7 @@ class EntropyFeatures:
         n = len(sig)
         if n < delay * (order - 1) + 1:
             return 0.0
-        permutations = {}
+        permutations: dict[tuple[int, ...], int] = {}
         for i in range(n - delay * (order - 1)):
             pattern = sig[i : i + delay * order : delay]
             key     = tuple(np.argsort(pattern))
@@ -361,7 +361,7 @@ class EntropyFeatures:
         return float(max(0.0, -np.sum(probs * np.log2(probs + 1e-10))))
 
     @staticmethod
-    def _approximate_entropy(sig: np.ndarray, m: int = 2, r: Optional[float] = None) -> float:
+    def _approximate_entropy(sig: np.ndarray, m: int = 2, r: float | None = None) -> float:
         """
         Approximate Entropy (Pincus 1991) — vectorised block-wise.
         Self-matches (i==j) included per the original ApEn definition.
@@ -393,7 +393,7 @@ class NonlinearFeatures:
     """Extract nonlinear dynamics features."""
 
     @staticmethod
-    def extract(sig: np.ndarray) -> Dict[str, float]:
+    def extract(sig: np.ndarray) -> dict[str, float]:
         sig = validate_signal_1d(sig, name='sig')
         features = {}
         features.update(NonlinearFeatures._hjorth_parameters(sig))
@@ -405,7 +405,7 @@ class NonlinearFeatures:
         return features
 
     @staticmethod
-    def _hjorth_parameters(sig: np.ndarray) -> Dict[str, float]:
+    def _hjorth_parameters(sig: np.ndarray) -> dict[str, float]:
         activity   = np.var(sig)
         diff1      = np.diff(sig)
         mobility   = np.sqrt(np.var(diff1) / (activity + 1e-10))
@@ -425,7 +425,7 @@ class NonlinearFeatures:
         Normalisation (n-1)/(n_max·k²) matches Higuchi 1988 Eq. 2.
         """
         n  = len(sig)
-        lk = np.zeros(kmax)
+        lk: np.ndarray = np.zeros(kmax)
 
         for k in range(1, kmax + 1):
             lm = np.zeros(k)
@@ -464,8 +464,8 @@ class NonlinearFeatures:
         n = len(sig)
         if n < 20:
             return 0.5
-        lags = np.arange(2, min(n // 2, 100))
-        rs   = np.zeros(len(lags))
+        lags: np.ndarray = np.arange(2, min(n // 2, 100))
+        rs: np.ndarray   = np.zeros(len(lags))
         for i, lag in enumerate(lags):
             splits  = n // lag
             if splits < 2:
@@ -542,8 +542,8 @@ class DecompositionFeatures:
     """Extract features from decomposed signals."""
 
     @staticmethod
-    def extract_from_components(components: List[np.ndarray],
-                                prefix: str = 'comp') -> Dict[str, float]:
+    def extract_from_components(components: list[np.ndarray],
+                                prefix: str = 'comp') -> dict[str, float]:
         features = {}
         for i, comp in enumerate(components):
             p = f'{prefix}_{i}'
@@ -585,8 +585,8 @@ class DecompositionFeatures:
         return features
 
     @staticmethod
-    def _cross_component_features(components: List[np.ndarray],
-                                  prefix: str) -> Dict[str, float]:
+    def _cross_component_features(components: list[np.ndarray],
+                                  prefix: str) -> dict[str, float]:
         features = {}
         n_comp   = len(components)
         for i in range(n_comp):

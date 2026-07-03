@@ -1,14 +1,14 @@
-import numpy as np
 import sys
+
+import numpy as np
+
 sys.path.insert(0, '..')
 
 from SigFeatX.aggregator import FeatureAggregator, SignalPreprocessor
-from SigFeatX.decompose import WaveletDecomposer, EMD, VMD
-from SigFeatX.features.features import DecompositionFeatures
 
 # Generate complex signal
 t = np.linspace(0, 2, 2000)
-signal = (np.sin(2 * np.pi * 5 * t) + 
+signal = (np.sin(2 * np.pi * 5 * t) +
           0.5 * np.sin(2 * np.pi * 15 * t) * np.exp(-t) +
           0.3 * np.sin(2 * np.pi * 25 * t) +
           0.2 * np.random.randn(2000))

@@ -16,9 +16,8 @@ Run:
 
 import numpy as np
 
-from SigFeatX.decompose import MODWT, CEEMDAN, HHT, SST
-from SigFeatX.features import RQAFeatures, MFDFAFeatures, AdvancedEntropyFeatures
-from SigFeatX import FeatureAggregator, Pipeline
+from SigFeatX.decompose import CEEMDAN, HHT, MODWT, SST
+from SigFeatX.features import AdvancedEntropyFeatures, MFDFAFeatures, RQAFeatures
 
 # ------------------------------------------------------------------------
 # Synthetic test signal: multi-component non-stationary
@@ -42,7 +41,7 @@ coeffs = modwt.decompose(sig)
 print(f"  Levels: {len(coeffs)}, each length = {len(coeffs[0])}")
 rec = modwt.reconstruct(coeffs)
 print(f"  Reconstruction RMSE: {np.sqrt(np.mean((sig - rec)**2)):.2e}")
-print(f"  Detail-band energies:")
+print("  Detail-band energies:")
 for i, c in enumerate(coeffs[:-1]):
     print(f"    Level {i+1}: {np.sum(c**2):.2f}")
 print(f"  Smooth band energy: {np.sum(coeffs[-1]**2):.2f}")
@@ -95,7 +94,7 @@ mfdfa_feats = MFDFAFeatures.extract(sig)
 print(f"  Singularity-spectrum width:   {mfdfa_feats['mfdfa_width']:.4f}")
 print(f"  Spectrum peak position alpha0: {mfdfa_feats['mfdfa_alpha0']:.4f}")
 print(f"  Asymmetry:                     {mfdfa_feats['mfdfa_asymmetry']:.4f}")
-print(f"  h(q) values:")
+print("  h(q) values:")
 for k, v in mfdfa_feats.items():
     if k.startswith('mfdfa_h_q'):
         print(f"    {k}: {v:.4f}")

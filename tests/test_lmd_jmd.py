@@ -11,14 +11,14 @@ or:
 
 import os
 import sys
+
 import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from SigFeatX.decompose.lmd import LMD
 from SigFeatX.decompose.jmd import JMD
-
+from SigFeatX.decompose.lmd import LMD
 
 # ── Signal factories ─────────────────────────────────────────────────────────
 
@@ -172,13 +172,13 @@ class TestJMD:
 
     def test_jump_variance_less_than_signal(self):
         sig = _multisine()
-        modes, jump = JMD(K=3, beta=0.03, max_iter=500).decompose(sig)
+        _modes, jump = JMD(K=3, beta=0.03, max_iter=500).decompose(sig)
         n = min(len(jump), len(sig))
         assert float(np.var(jump[:n])) < float(np.var(sig[:n])), (
             f"jump var {np.var(jump[:n]):.4f} >= signal var {np.var(sig[:n]):.4f}"
         )
 
-    def test_rejects_K_zero(self):
+    def test_rejects_k_zero(self):
         with pytest.raises(ValueError, match='K must be >= 1'):
             JMD(K=0)
 

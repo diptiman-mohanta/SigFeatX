@@ -15,7 +15,7 @@ Features extracted:
   - Asymmetry of f(alpha)
 """
 
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -40,7 +40,7 @@ class MFDFAFeatures:
         ).astype(int)
 
     @staticmethod
-    def _Fq(profile: np.ndarray, scale: int, q_values: np.ndarray) -> np.ndarray:
+    def _Fq(profile: np.ndarray, scale: int, q_values: np.ndarray) -> np.ndarray:  # noqa: N802
         """Compute F_q(s) for every q in q_values at scale s."""
         N = len(profile)
         n_boxes = N // scale
@@ -83,9 +83,9 @@ class MFDFAFeatures:
     @staticmethod
     def extract(
         sig: np.ndarray,
-        q_values: Optional[Sequence[float]] = None,
+        q_values: Sequence[float] | None = None,
         n_scales: int = 16,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Compute multifractal features.
 
@@ -98,7 +98,7 @@ class MFDFAFeatures:
         sig = validate_signal_1d(sig, name='sig')
         if len(sig) < 64:
             # Too short for reliable MFDFA — return zeros without crashing.
-            zeros: Dict[str, float] = {
+            zeros: dict[str, float] = {
                 'mfdfa_width': 0.0,
                 'mfdfa_alpha0': 0.0,
                 'mfdfa_asymmetry': 0.0,
@@ -107,9 +107,10 @@ class MFDFAFeatures:
                 zeros[f'mfdfa_h_q{q:+.0f}'.replace('+', 'p').replace('-', 'n')] = 0.0
             return zeros
 
-        if q_values is None:
-            q_values = [-5.0, -3.0, -1.0, 0.0, 1.0, 3.0, 5.0]
-        q_values = np.asarray(q_values, dtype=float)
+        q_arr = np.asarray(
+            q_values if q_values is not None else [-5.0, -3.0, -1.0, 0.0, 1.0, 3.0, 5.0],
+            dtype=float,
+        )
 
         profile = MFDFAFeatures._profile(sig)
         scales = MFDFAFeatures._scales(len(sig), n_scales)
@@ -117,14 +118,14 @@ class MFDFAFeatures:
             scales = np.array([8, 16, 32], dtype=int)
 
         # F_q(s) matrix
-        Fq_matrix = np.zeros((len(scales), len(q_values)))
+        Fq_matrix = np.zeros((len(scales), len(q_arr)))
         for si, s in enumerate(scales):
-            Fq_matrix[si] = MFDFAFeatures._Fq(profile, int(s), q_values)
+            Fq_matrix[si] = MFDFAFeatures._Fq(profile, int(s), q_arr)
 
         # h(q): slope of log(F_q) vs log(s) per q
         log_s = np.log(scales).astype(float)
-        h = np.zeros(len(q_values))
-        for qi in range(len(q_values)):
+        h = np.zeros(len(q_arr))
+        for qi in range(len(q_arr)):
             yi = Fq_matrix[:, qi]
             mask = (yi > 0) & np.isfinite(yi)
             if mask.sum() < 2:
@@ -135,10 +136,10 @@ class MFDFAFeatures:
             h[qi] = slope
 
         # Singularity-spectrum width via Legendre transform
-        tau = q_values * h - 1.0
+        tau = q_arr * h - 1.0
         # Numerical derivative alpha = d tau / d q
-        alpha = np.gradient(tau, q_values)
-        f_alpha = q_values * alpha - tau
+        alpha = np.gradient(tau, q_arr)
+        f_alpha = q_arr * alpha - tau
 
         valid_alpha = alpha[np.isfinite(alpha)]
         if valid_alpha.size == 0:
@@ -158,12 +159,12 @@ class MFDFAFeatures:
                 alpha0 = 0.0
                 asymmetry = 0.0
 
-        out: Dict[str, float] = {
+        out: dict[str, float] = {
             'mfdfa_width': float(width),
             'mfdfa_alpha0': float(alpha0),
             'mfdfa_asymmetry': float(asymmetry),
         }
-        for q_val, h_val in zip(q_values, h):
+        for q_val, h_val in zip(q_arr, h, strict=True):
             # Compose stable key
             sign = 'p' if q_val >= 0 else 'n'
             out[f'mfdfa_h_q{sign}{abs(int(q_val))}'] = (

@@ -19,14 +19,13 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from SigFeatX.decompose.modwt import MODWT
 from SigFeatX.decompose.ceemdan import CEEMDAN
 from SigFeatX.decompose.hht import HHT
+from SigFeatX.decompose.modwt import MODWT
 from SigFeatX.decompose.sst import SST
-from SigFeatX.features.rqa import RQAFeatures
-from SigFeatX.features.mfdfa import MFDFAFeatures
 from SigFeatX.features.advanced_entropy import AdvancedEntropyFeatures
-
+from SigFeatX.features.mfdfa import MFDFAFeatures
+from SigFeatX.features.rqa import RQAFeatures
 
 # ---------------------------------------------------------------------------
 # Signal factories (reference-validated)
@@ -94,7 +93,7 @@ class TestMODWT:
         coeffs0 = MODWT(level=3).decompose(sig)
         coeffs1 = MODWT(level=3).decompose(np.roll(sig, shift))
         # Each level should be a circular shift of the original
-        for c0, c1 in zip(coeffs0, coeffs1):
+        for c0, c1 in zip(coeffs0, coeffs1, strict=True):
             rolled = np.roll(c0, shift)
             # Allow tiny numerical wiggle
             err = np.max(np.abs(rolled - c1))
@@ -146,7 +145,7 @@ class TestCEEMDAN:
         sig = _multisine()[:200]
         a = CEEMDAN(trials=10, max_imf=3, rng=99).decompose(sig)
         b = CEEMDAN(trials=10, max_imf=3, rng=99).decompose(sig)
-        for ma, mb in zip(a, b):
+        for ma, mb in zip(a, b, strict=True):
             assert np.allclose(ma, mb)
 
     def test_rejects_low_trial_count(self):
@@ -166,7 +165,7 @@ class TestHHT:
 
     def test_instantaneous_attributes(self):
         sig = _sine(freq=10.0, fs=200, dur=2.0)
-        amp, phase, ifreq = HHT.instantaneous_attributes(sig, fs=200)
+        amp, _phase, ifreq = HHT.instantaneous_attributes(sig, fs=200)
         assert len(amp) == len(sig)
         assert len(ifreq) == len(sig) - 1
         # Amplitude of unit-amplitude sine should be ~1

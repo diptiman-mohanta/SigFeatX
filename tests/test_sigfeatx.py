@@ -30,31 +30,39 @@ Figures saved to  tests/figures/:
 
 import os
 import sys
-import warnings
 import traceback
+import warnings
+
+import matplotlib
 import numpy as np
 import pytest
-import matplotlib
+
 matplotlib.use("Agg")          # no display needed
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 from scipy import signal as scipy_signal
 
 # ── Make sure SigFeatX is importable when run from repo root ────────────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from SigFeatX.preprocess import SignalPreprocessor
+from SigFeatX.aggregator import FeatureAggregator
 from SigFeatX.decompose import (
-    EMD, VMD, SVMD, EFD,
-    WaveletDecomposer, ShortTimeFourierTransform, FourierTransform,
-)
-from SigFeatX.features.features import (
-    TimeDomainFeatures, FrequencyDomainFeatures,
-    EntropyFeatures, NonlinearFeatures, DecompositionFeatures,
+    EFD,
+    EMD,
+    SVMD,
+    VMD,
+    ShortTimeFourierTransform,
+    WaveletDecomposer,
 )
 from SigFeatX.decomposition_validator import DecompositionValidator
-from SigFeatX.feature_consistency import validate_feature_dict, CrossMethodChecker
-from SigFeatX.aggregator import FeatureAggregator
+from SigFeatX.feature_consistency import CrossMethodChecker, validate_feature_dict
+from SigFeatX.features.features import (
+    DecompositionFeatures,
+    EntropyFeatures,
+    FrequencyDomainFeatures,
+    NonlinearFeatures,
+    TimeDomainFeatures,
+)
+from SigFeatX.preprocess import SignalPreprocessor
 
 # ── Output directory ────────────────────────────────────────────────────────
 FIG_DIR = os.path.join(os.path.dirname(__file__), "figures")
@@ -468,7 +476,7 @@ def fig1_signals(preprocessed: dict):
         data = [sig,
                 preprocessed[name]["detrended"],
                 preprocessed[name]["normalised"]]
-        for col, (d, title) in enumerate(zip(data, titles)):
+        for col, (d, title) in enumerate(zip(data, titles, strict=True)):
             ax = axes[row][col]
             ax.plot(t[:1000], d[:1000], color=COLORS[name], lw=0.8)
             ax.set_title(f"{name} — {title}", fontsize=9)
@@ -542,7 +550,7 @@ def fig6_spectrograms(all_decomp: dict):
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
     fig.suptitle("Fig 6 — STFT Spectrograms", fontsize=13, fontweight="bold")
 
-    for ax, name in zip(axes, SIGNALS):
+    for ax, name in zip(axes, SIGNALS, strict=True):
         f_arr, t_arr, Zxx = all_decomp[name]["STFT"]
         img = ax.pcolormesh(t_arr, f_arr, 20 * np.log10(Zxx + 1e-10),
                             shading="gouraud", cmap="inferno")
@@ -580,7 +588,7 @@ def fig7_quality_metrics(all_quality: dict):
     ylabels = ["SNR (dB)", "Normalised RMSE", "Energy Preservation Ratio"]
     ideal   = [None, 0.0, 1.0]
 
-    for col, (metric, ylabel, id_val) in enumerate(zip(metrics, ylabels, ideal)):
+    for col, (metric, ylabel, id_val) in enumerate(zip(metrics, ylabels, ideal, strict=True)):
         ax = axes[col]
         for si, sname in enumerate(signal_names):
             vals = []
@@ -591,7 +599,7 @@ def fig7_quality_metrics(all_quality: dict):
             bars = ax.bar(x + offset, vals, width,
                           label=sname, color=list(COLORS.values())[si], alpha=0.8)
             # Value labels
-            for bar, v in zip(bars, vals):
+            for bar, v in zip(bars, vals, strict=True):
                 ax.text(bar.get_x() + bar.get_width() / 2,
                         bar.get_height() * 1.01,
                         f"{v:.2g}", ha="center", va="bottom", fontsize=6)

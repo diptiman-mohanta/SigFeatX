@@ -6,10 +6,10 @@ Optional tqdm wrapper. Falls back to a no-op when tqdm is not installed.
 Internal helper used by FeatureAggregator.extract_batch and related methods.
 """
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 
-def progress_iter(iterable: Iterable, *, total: Optional[int] = None,
+def progress_iter(iterable: Iterable, *, total: int | None = None,
                   desc: str = "Extracting", enabled: bool = True):
     """
     Wrap an iterable with tqdm if available and ``enabled=True``.

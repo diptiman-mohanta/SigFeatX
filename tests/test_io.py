@@ -1,7 +1,8 @@
-import numpy as np
 import os
-import pytest
 import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

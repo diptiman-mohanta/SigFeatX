@@ -20,20 +20,19 @@ or:
 
 import os
 import sys
+
 import numpy as np
-import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from SigFeatX.decompose.vmd import VMD
-from SigFeatX.decompose.emd import EMD
 from SigFeatX.decompose.efd import EFD
+from SigFeatX.decompose.emd import EMD
+from SigFeatX.decompose.vmd import VMD
 from SigFeatX.features.features import (
-    FrequencyDomainFeatures,
-    EntropyFeatures,
     DecompositionFeatures,
+    EntropyFeatures,
+    FrequencyDomainFeatures,
 )
-
 
 # ── Signal factories ─────────────────────────────────────────────────────────
 

@@ -43,7 +43,7 @@ BUG 3 — Float while-loop boundary drift  [MINOR, FIXED IN THIS VERSION]
 
 import numpy as np
 from scipy import signal as scipy_signal
-from scipy.fft import fft, ifft, fftfreq
+from scipy.fft import fft, fftfreq, ifft
 
 from SigFeatX._validation import validate_signal_1d
 

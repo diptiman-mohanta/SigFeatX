@@ -1,10 +1,12 @@
-import numpy as np
 import sys
+
+import numpy as np
+
 sys.path.insert(0, '..')
 
-from SigFeatX import FeatureAggregator
-from SigFeatX.utils import SignalUtils
 import pandas as pd
+
+from SigFeatX import FeatureAggregator
 
 # Generate multiple signals
 n_signals = 10
@@ -17,8 +19,8 @@ for i in range(n_signals):
     t = np.linspace(0, 1, 1000)
     freq1 = 5 + i
     freq2 = 10 + i * 2
-    sig = (np.sin(2 * np.pi * freq1 * t) + 
-           0.5 * np.sin(2 * np.pi * freq2 * t) + 
+    sig = (np.sin(2 * np.pi * freq1 * t) +
+           0.5 * np.sin(2 * np.pi * freq2 * t) +
            0.1 * np.random.randn(1000))
     signals.append(sig)
 
@@ -41,7 +43,7 @@ for i, sig in enumerate(signals):
     )
     features['signal_id'] = i
     all_features.append(features)
-    
+
     if (i + 1) % 5 == 0:
         print(f"Processed {i + 1}/{n_signals} signals...")
 

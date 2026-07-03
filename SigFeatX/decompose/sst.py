@@ -22,7 +22,6 @@ Numerically, we differentiate the phase along time with central differences
 and skip points where |STFT| is too small (gives unstable phase).
 """
 
-from typing import Optional, Tuple
 
 import numpy as np
 
@@ -52,7 +51,7 @@ class SST:
         self,
         fs: float = 1.0,
         nperseg: int = 256,
-        noverlap: Optional[int] = None,
+        noverlap: int | None = None,
         window: str = 'hann',
         gamma: float = 1e-6,
     ):
@@ -72,7 +71,7 @@ class SST:
     # Forward transform
     # ------------------------------------------------------------------
 
-    def transform(self, sig: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def transform(self, sig: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute the synchrosqueezed spectrogram via the Auger-Flandrin
         reassignment operator:
@@ -137,7 +136,7 @@ class SST:
         valid = mask & (omega_hat >= f[0]) & (omega_hat <= f[-1])
 
         # Vectorised accumulation via np.add.at
-        ii, jj = np.where(valid)
+        _ii, jj = np.where(valid)
         target = np.round((omega_hat[valid] - f[0]) / df).astype(int)
         target = np.clip(target, 0, len(f) - 1)
         np.add.at(Tx, (target, jj), magnitude[valid])
@@ -152,7 +151,7 @@ class SST:
         """
         Quick feature summary from the synchrosqueezed spectrogram.
         """
-        t, f, Tx = self.transform(sig)
+        _t, f, Tx = self.transform(sig)
 
         marginal = np.sum(Tx, axis=1)
         total = float(np.sum(marginal))

@@ -22,7 +22,6 @@ For feature extraction, the most useful outputs are:
   - Marginal-spectrum peak and centroid
 """
 
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.signal import hilbert
@@ -56,7 +55,7 @@ class HHT:
     def instantaneous_attributes(
         imf: np.ndarray,
         fs: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute (instantaneous amplitude, instantaneous phase, instantaneous
         frequency) for a single mode.
@@ -80,11 +79,11 @@ class HHT:
 
     def hilbert_spectrum(
         self,
-        imfs: List[np.ndarray],
+        imfs: list[np.ndarray],
         n_freq_bins: int = 128,
         f_min: float = 0.0,
-        f_max: Optional[float] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        f_max: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute the Hilbert spectrum H(t, f) by aggregating IMF energy onto
         a time-frequency grid.
@@ -140,11 +139,11 @@ class HHT:
 
     def marginal_spectrum(
         self,
-        imfs: List[np.ndarray],
+        imfs: list[np.ndarray],
         n_freq_bins: int = 128,
         f_min: float = 0.0,
-        f_max: Optional[float] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        f_max: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute the marginal Hilbert spectrum h(f) by integrating H(t, f)
         across time.
@@ -162,7 +161,7 @@ class HHT:
     # Feature extraction
     # ------------------------------------------------------------------
 
-    def extract_features(self, sig: np.ndarray) -> Dict[str, float]:
+    def extract_features(self, sig: np.ndarray) -> dict[str, float]:
         """
         End-to-end: decompose ``sig`` with the configured decomposer, run
         Hilbert analysis on each IMF, return a flat feature dict.
@@ -182,7 +181,7 @@ class HHT:
         if not imfs:
             return {}
 
-        features: Dict[str, float] = {}
+        features: dict[str, float] = {}
 
         for k, imf in enumerate(imfs):
             amp, _phase, ifreq = self.instantaneous_attributes(imf, self.fs)

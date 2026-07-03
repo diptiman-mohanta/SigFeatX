@@ -1,6 +1,6 @@
 """Internal validation helpers for public SigFeatX APIs."""
 
-from typing import Iterable, List
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -30,7 +30,7 @@ def validate_signal_batch(
     *,
     name: str = "signals",
     require_finite: bool = True,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """Normalize a batch input to a list of 1D arrays."""
     if isinstance(signals, np.ndarray):
         if signals.ndim == 1:
@@ -93,7 +93,7 @@ def validate_n_jobs(n_jobs: int) -> int:
     raise ValueError(f"n_jobs must be -1 or a positive integer; got {n_jobs}.")
 
 
-def validate_unique_names(names: Iterable[str], *, name: str = "names") -> List[str]:
+def validate_unique_names(names: Iterable[str], *, name: str = "names") -> list[str]:
     """Validate that user-provided names are unique and non-empty."""
     out = [str(item) for item in names]
     if any(item == "" for item in out):

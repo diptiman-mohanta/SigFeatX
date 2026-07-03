@@ -13,9 +13,7 @@ All formats round-trip pandas DataFrames produced by ``BatchResult.dataframe``.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-import numpy as np
+from typing import Any
 
 
 class BatchIO:
@@ -30,7 +28,7 @@ class BatchIO:
         dataframe,
         filepath: str,
         compression: str = 'snappy',
-        metadata: Optional[Dict[str, str]] = None,
+        metadata: dict[str, str] | None = None,
     ) -> None:
         """
         Save a feature DataFrame to Parquet.
@@ -47,11 +45,6 @@ class BatchIO:
         pyarrow (preferred) or fastparquet. Install with:
             pip install pyarrow
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required to save Parquet files.")
-
         try:
             import pyarrow as pa
             import pyarrow.parquet as pq
@@ -82,12 +75,12 @@ class BatchIO:
         """Load a Parquet file back into a pandas DataFrame."""
         try:
             import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required to load Parquet files.")
+        except ImportError as exc:
+            raise ImportError("pandas is required to load Parquet files.") from exc
         return pd.read_parquet(filepath)
 
     @staticmethod
-    def load_parquet_metadata(filepath: str) -> Dict[str, str]:
+    def load_parquet_metadata(filepath: str) -> dict[str, str]:
         """Read user metadata attached via ``save_parquet(metadata=...)``."""
         try:
             import pyarrow.parquet as pq
@@ -114,7 +107,7 @@ class BatchIO:
         mode: str = 'w',
         complib: str = 'blosc',
         complevel: int = 5,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Save a feature DataFrame to HDF5.
@@ -129,11 +122,6 @@ class BatchIO:
         complevel : 0-9 compression level.
         metadata  : optional dict stored as JSON in the table's user_block.
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required to save HDF5 files.")
-
         dataframe.to_hdf(
             filepath,
             key=key,
@@ -157,12 +145,12 @@ class BatchIO:
         """Load a feature DataFrame from HDF5."""
         try:
             import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required to load HDF5 files.")
+        except ImportError as exc:
+            raise ImportError("pandas is required to load HDF5 files.") from exc
         return pd.read_hdf(filepath, key=key)
 
     @staticmethod
-    def load_hdf5_metadata(filepath: str, key: str = 'features') -> Dict[str, Any]:
+    def load_hdf5_metadata(filepath: str, key: str = 'features') -> dict[str, Any]:
         """Read user metadata attached via ``save_hdf5(metadata=...)``."""
         try:
             import h5py
@@ -193,8 +181,8 @@ class BatchIO:
         """Load a Feather file."""
         try:
             import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required to load Feather files.")
+        except ImportError as exc:
+            raise ImportError("pandas is required to load Feather files.") from exc
         df = pd.read_feather(filepath)
         # Reset original index if it was preserved on save
         if 'signal_idx' in df.columns:
@@ -209,7 +197,7 @@ class BatchIO:
     def append_parquet(
         dataframe,
         directory: str,
-        partition_name: Optional[str] = None,
+        partition_name: str | None = None,
     ) -> str:
         """
         Append a feature batch to a partitioned Parquet dataset.
@@ -244,7 +232,7 @@ class BatchIO:
     def save(
         dataframe,
         filepath: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Dispatch save by file extension.
@@ -281,13 +269,13 @@ class BatchIO:
         if suffix == '.csv':
             try:
                 import pandas as pd
-            except ImportError:
-                raise ImportError("pandas is required to load CSV files.")
+            except ImportError as exc:
+                raise ImportError("pandas is required to load CSV files.") from exc
             return pd.read_csv(filepath, index_col=0)
         if suffix == '.json':
             try:
                 import pandas as pd
-            except ImportError:
-                raise ImportError("pandas is required to load JSON files.")
+            except ImportError as exc:
+                raise ImportError("pandas is required to load JSON files.") from exc
             return pd.read_json(filepath, orient='records')
         raise ValueError(f"Unsupported extension '{suffix}' for '{filepath}'.")

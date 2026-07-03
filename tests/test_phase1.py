@@ -10,16 +10,14 @@ Tests for the 0.2.0 phase-1 upgrades:
 
 import os
 import sys
-import tempfile
 
 import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from SigFeatX import FeatureAggregator, Pipeline, BatchIO
-from SigFeatX._progress import progress_iter, ProgressBar
-
+from SigFeatX import BatchIO, FeatureAggregator, Pipeline
+from SigFeatX._progress import ProgressBar, progress_iter
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -193,9 +191,10 @@ class TestSklearnWrapper:
         assert any('cross_' in n for n in tr.feature_names_)
 
     def test_in_sklearn_pipeline(self, fs, signals):
-        from SigFeatX import SigFeatXTransformer
         from sklearn.pipeline import Pipeline as SkPipeline
         from sklearn.preprocessing import StandardScaler
+
+        from SigFeatX import SigFeatXTransformer
 
         X = np.array([s[:800] for s in signals])
         sk = SkPipeline([

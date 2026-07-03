@@ -38,7 +38,7 @@ Usage
 """
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -60,10 +60,10 @@ class Pipeline:
 
     def __init__(self, fs: float = 1.0):
         self.fs = fs
-        self._detrend_cfg: Optional[Dict[str, Any]] = None
-        self._denoise_cfg: Optional[Dict[str, Any]] = None
-        self._normalize_cfg: Optional[Dict[str, Any]] = None
-        self._decomposition_methods: List[str] = ['fourier', 'dwt']
+        self._detrend_cfg: dict[str, Any] | None = None
+        self._denoise_cfg: dict[str, Any] | None = None
+        self._normalize_cfg: dict[str, Any] | None = None
+        self._decomposition_methods: list[str] = ['fourier', 'dwt']
         self._extract_raw: bool = True
         self._validate: bool = False
         self._check_consistency: bool = False
@@ -112,7 +112,7 @@ class Pipeline:
     # Decomposition / feature config
     # ------------------------------------------------------------------
 
-    def decompose(self, methods: Union[str, List[str]]) -> 'Pipeline':
+    def decompose(self, methods: str | list[str]) -> 'Pipeline':
         """
         Set decomposition methods. Pass a single name or list.
         Valid: 'fourier', 'stft', 'dwt', 'wpd', 'emd', 'vmd', 'svmd',
@@ -163,7 +163,7 @@ class Pipeline:
     # Terminal operations
     # ------------------------------------------------------------------
 
-    def extract(self, signal: np.ndarray) -> Dict[str, float]:
+    def extract(self, signal: np.ndarray) -> dict[str, float]:
         """Run the configured pipeline on a single 1D signal."""
         agg = FeatureAggregator(fs=self.fs)
         return agg.extract_all_features(
@@ -215,9 +215,9 @@ class Pipeline:
     def extract_multichannel(
         self,
         signals_2d: np.ndarray,
-        channel_names: Optional[List[str]] = None,
+        channel_names: list[str] | None = None,
         include_cross: bool = True,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Run on a (n_channels, n_samples) array."""
         agg = FeatureAggregator(fs=self.fs)
         return agg.extract_multichannel(
@@ -239,7 +239,7 @@ class Pipeline:
         """Return a deep copy. Useful for grid search over configurations."""
         return deepcopy(self)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the configuration."""
         return {
             'fs': self.fs,
@@ -271,12 +271,12 @@ class Pipeline:
     # Internals
     # ------------------------------------------------------------------
 
-    def _preprocess_kwargs(self) -> Dict[str, Any]:
+    def _preprocess_kwargs(self) -> dict[str, Any]:
         """Translate fluent config into aggregator preprocess_kwargs."""
         if not self._preprocess_enabled:
             return {}
 
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             'detrend': self._detrend_cfg is not None,
             'denoise': self._denoise_cfg is not None,
             'normalize': self._normalize_cfg is not None,

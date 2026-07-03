@@ -14,9 +14,9 @@ Run:
 import numpy as np
 
 from SigFeatX import (
+    BatchIO,
     FeatureAggregator,
     Pipeline,
-    BatchIO,
 )
 
 # Generate synthetic signals
@@ -93,9 +93,10 @@ print("  2. SKLEARN INTEGRATION")
 print("=" * 64)
 
 try:
+    from sklearn.ensemble import RandomForestClassifier
     from sklearn.pipeline import Pipeline as SkPipeline
     from sklearn.preprocessing import StandardScaler
-    from sklearn.ensemble import RandomForestClassifier
+
     from SigFeatX import SigFeatXTransformer
 
     # Fake binary labels for demonstration
@@ -116,7 +117,7 @@ try:
     pipe_sk.fit(X, y)
     score = pipe_sk.score(X, y)
     n_features = pipe_sk.named_steps['features'].n_features_out_
-    print(f"\n  sklearn Pipeline fitted")
+    print("\n  sklearn Pipeline fitted")
     print(f"  -> {n_features} features extracted per signal")
     print(f"  -> Train accuracy: {score:.3f}  (overfit on tiny demo data)")
 
@@ -131,8 +132,8 @@ print("\n" + "=" * 64)
 print("  3. BATCH IO  (Parquet / HDF5 / Feather)")
 print("=" * 64)
 
-import tempfile
 import os
+import tempfile
 
 with tempfile.TemporaryDirectory() as tmpdir:
     parquet_path = os.path.join(tmpdir, 'features.parquet')
@@ -164,7 +165,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     # Auto-dispatch
     BatchIO.save(df, parquet_path)
-    print(f"  Auto-dispatch by extension works.")
+    print("  Auto-dispatch by extension works.")
 
 
 # ------------------------------------------------------------------------
