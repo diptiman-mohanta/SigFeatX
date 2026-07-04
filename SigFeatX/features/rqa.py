@@ -86,38 +86,36 @@ class RQAFeatures:
         triangle would silently halve the point count DET normalises by.
         """
         N = R.shape[0]
-        lengths = []
+        chunks = []
         for offset in range(1, N):
-            lengths.extend(RQAFeatures._runs_of_ones(np.diag(R, k=offset), l_min))
-            lengths.extend(RQAFeatures._runs_of_ones(np.diag(R, k=-offset), l_min))
-        return np.asarray(lengths, dtype=int)
+            chunks.append(RQAFeatures._runs_of_ones(np.diag(R, k=offset), l_min))
+            chunks.append(RQAFeatures._runs_of_ones(np.diag(R, k=-offset), l_min))
+        return np.concatenate(chunks) if chunks else np.empty(0, dtype=int)
 
     @staticmethod
     def _vertical_line_lengths(R: np.ndarray, v_min: int = 2) -> np.ndarray:
         """All vertical line lengths >= v_min."""
         N = R.shape[0]
-        lengths = []
-        for col in range(N):
-            lengths.extend(RQAFeatures._runs_of_ones(R[:, col], v_min))
-        return np.asarray(lengths, dtype=int)
+        chunks = [RQAFeatures._runs_of_ones(R[:, col], v_min) for col in range(N)]
+        return np.concatenate(chunks) if chunks else np.empty(0, dtype=int)
 
     @staticmethod
-    def _runs_of_ones(arr: np.ndarray, min_len: int) -> list:
-        """Find runs of 1s in a 1D binary array; return lengths >= min_len."""
+    def _runs_of_ones(arr: np.ndarray, min_len: int) -> np.ndarray:
+        """Find runs of 1s in a 1D binary array; return lengths >= min_len.
+
+        Vectorized via edge detection on the zero-padded diff: a run start
+        is a 0->1 transition (+1 in the diff), a run end is a 1->0
+        transition (-1). Padding with 0 on both sides means a run that
+        touches either end of the array is still closed off correctly.
+        """
         if arr.size == 0:
-            return []
-        out = []
-        run = 0
-        for v in arr:
-            if v == 1:
-                run += 1
-            else:
-                if run >= min_len:
-                    out.append(run)
-                run = 0
-        if run >= min_len:
-            out.append(run)
-        return out
+            return np.empty(0, dtype=int)
+        padded = np.concatenate(([0], arr.astype(np.int8), [0]))
+        diffs = np.diff(padded.astype(np.int8))
+        starts = np.flatnonzero(diffs == 1)
+        ends = np.flatnonzero(diffs == -1)
+        lengths = ends - starts
+        return lengths[lengths >= min_len]
 
     # ------------------------------------------------------------------
     # Public extraction

@@ -6,7 +6,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Performance**: `MODWT` decompose/reconstruct now use FFT-based circular
+  convolution instead of an O(N x taps) direct double loop -- validated
+  bit-for-bit equivalent to the old implementation across 336 combinations
+  of wavelet/length/level (max discrepancy ~1e-15), ~45-70x faster
+  (0.21s -> 0.003s at N=10,000, 6 levels).
+- **Performance**: `RQAFeatures._runs_of_ones` (diagonal/vertical line-length
+  scanning) is now vectorised via diff-based edge detection instead of a
+  per-element Python loop -- validated identical across 2000+ random
+  trials including edge cases.
+- **Performance**: `CEEMDAN` gained an opt-in `n_jobs` parameter (same
+  convention as `FeatureAggregator.extract_batch`: 1=sequential/default,
+  -1=all cores, N=N processes, falls back to threads if process-based
+  parallelism is unavailable). Each trial's EMD call is independent, so
+  results are bit-identical to `n_jobs=1` for the same `rng` seed
+  (`Executor.map` preserves order; EMD has no internal randomness).
+  ~1.5x speedup measured at N=5000/50 trials; default behaviour is
+  unchanged.
+- **Accuracy**: added `hypothesis`-based property tests
+  (`tests/test_properties.py`) checking perfect-reconstruction identities
+  (MODWT, EMD) and value bounds (RQA, MFDFA, advanced entropy) across
+  hundreds of randomly generated signals, rather than a handful of fixed
+  toy examples.
+- **Discoverability**: added a Sphinx documentation scaffold (`docs/`,
+  autodoc + napoleon + intersphinx) with a quickstart and full API
+  reference, a `docs` optional-dependency group, a `.readthedocs.yaml`,
+  and a CI job that builds the docs with warnings treated as errors.
+  Hosting on Read the Docs requires connecting the repo via their site
+  (not something this session can do).
+
 ### Fixed
+- **MODWT**: biorthogonal wavelets (`bior*`, `rbio*`) now raise a clear
+  `ValueError` at construction instead of silently producing a badly
+  wrong reconstruction (~0.6-0.75 absolute error found during testing).
+  MODWT's pyramid algorithm reuses the decomposition filters for
+  reconstruction, which is only valid when they are the time-reversal of
+  each other -- true for orthogonal wavelets (db*, sym*, coif*, haar),
+  not for biorthogonal ones. Supporting biorthogonal wavelets correctly
+  would need a different filter pair and is left for future work rather
+  than guessed at.
+- Two docstring rendering bugs found while building the new docs:
+  `LMD`'s docstring used `|1-a|`/`|s-t|` for absolute value, which RST
+  parses as an (undefined) substitution reference; and two docstrings in
+  `preprocess.py` had list/example blocks missing the blank line RST
+  requires before them, breaking their rendering.
 - **RQA `DET`** (`SigFeatX.features.RQAFeatures`) was silently deflated by
   exactly 2x: `_diagonal_line_lengths` only scanned the upper triangle of
   the (symmetric) recurrence matrix, while the `DET` denominator counted

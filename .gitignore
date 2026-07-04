@@ -70,6 +70,10 @@ Thumbs.db
 .mypy_cache/
 .ruff_cache/
 
+# Sphinx docs build output (source lives in docs/, this is generated)
+docs/_build/
+docs/generated/
+
 # uv
 # uv.lock is intentionally committed — remove this line if you want to ignore it
 # uv.lock

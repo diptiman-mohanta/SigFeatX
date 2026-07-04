@@ -78,10 +78,17 @@ viz = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "hypothesis>=6.100",
     "ruff>=0.8.0",
     "mypy>=1.10",
     "build>=1.0",
     "twine>=4.0",
+]
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=2.0",
+    "myst-parser>=2.0",
+    "sphinx-autodoc-typehints>=1.25",
 ]
 all = [
     "scikit-learn>=1.3",

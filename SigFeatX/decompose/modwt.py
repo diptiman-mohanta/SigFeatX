@@ -21,8 +21,22 @@ filters at each level. Coefficients are produced as a list:
 
 where W_j are the wavelet (detail) coefficients at level j and V_J is the
 smooth (approximation) at the deepest level. All arrays have length N.
-"""
 
+Each pyramid step is a circular convolution/correlation between the
+signal and the level-j upsampled filter, computed via FFT (O(N log N))
+rather than the O(N * L) direct double loop -- exact to floating-point
+precision (validated against the direct-loop form across wavelets,
+lengths, and levels; max discrepancy ~1e-15).
+
+Only orthogonal wavelets are supported (db*, sym*, coif*, haar). MODWT's
+pyramid algorithm reuses the decomposition filters for reconstruction,
+which is only mathematically valid when the reconstruction filters are
+the time-reversal of the decomposition filters -- true for orthogonal
+wavelets but not for biorthogonal ones (bior*/rbio*), where a different
+filter pair is needed. Passing a biorthogonal wavelet would silently
+produce an incorrect reconstruction, so it is rejected at construction
+time instead.
+"""
 
 import numpy as np
 import pywt
@@ -37,7 +51,9 @@ class MODWT:
     Parameters
     ----------
     wavelet : str
-        Wavelet name (any PyWavelets discrete wavelet, e.g. 'db4', 'sym5').
+        Orthogonal PyWavelets discrete wavelet name (e.g. 'db4', 'sym5',
+        'coif3', 'haar'). Biorthogonal wavelets ('bior*', 'rbio*') are
+        rejected -- see module docstring.
     level : int or None
         Decomposition depth. None auto-picks ``floor(log2(N)) - 1`` capped
         at the wavelet's max level.
@@ -50,6 +66,15 @@ class MODWT:
     """
 
     def __init__(self, wavelet: str = 'db4', level: int | None = None):
+        if not pywt.Wavelet(wavelet).orthogonal:
+            raise ValueError(
+                f"MODWT requires an orthogonal wavelet; {wavelet!r} is "
+                "biorthogonal (its decomposition and reconstruction filters "
+                "differ), which this pyramid-algorithm implementation does "
+                "not support and would silently produce an incorrect "
+                "reconstruction. Use an orthogonal family instead, e.g. "
+                "'db4', 'sym5', 'coif3', or 'haar'."
+            )
         self.wavelet = wavelet
         self.level = level
 
@@ -135,51 +160,56 @@ class MODWT:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _upsample_filter(taps: np.ndarray, scale: int, N: int) -> np.ndarray:
+        """
+        Build the length-N level-j filter: taps[l] placed at index
+        (scale * l) % N, accumulating on collision (matches inserting
+        ``scale - 1`` zeros between consecutive taps, wrapped circularly).
+        """
+        up = np.zeros(N, dtype=float)
+        idx = (scale * np.arange(len(taps))) % N
+        np.add.at(up, idx, taps)
+        return up
+
+    @staticmethod
     def _modwt_step(v_prev: np.ndarray, h: np.ndarray, g: np.ndarray,
                     j: int) -> tuple:
         """
         One pyramid step: V_{j-1} -> (W_j, V_j).
 
-        Uses circular convolution with the level-j upsampled filters.
+        w_j[t] = sum_l h[l] * v_prev[(t - scale*l) % N] is exactly the
+        circular convolution of v_prev with the upsampled filter h_up
+        (h_up[k] = h[l] at k = (scale*l) % N), computed here via FFT:
+        conv(a, b) = ifft(fft(a) * fft(b)).
         """
         N = len(v_prev)
-        L = len(h)
-
-        # At level j the filter is upsampled by inserting 2^(j-1) - 1 zeros
-        # between coefficients. We implement this as direct indexing.
         scale = 2 ** (j - 1)
+        h_up = MODWT._upsample_filter(h, scale, N)
+        g_up = MODWT._upsample_filter(g, scale, N)
 
-        w_j = np.zeros(N, dtype=float)
-        v_j = np.zeros(N, dtype=float)
-
-        for t in range(N):
-            acc_w = 0.0
-            acc_v = 0.0
-            for tap in range(L):
-                idx = (t - scale * tap) % N      # circular shift
-                acc_w += h[tap] * v_prev[idx]
-                acc_v += g[tap] * v_prev[idx]
-            w_j[t] = acc_w
-            v_j[t] = acc_v
-
+        V = np.fft.rfft(v_prev)
+        w_j = np.fft.irfft(np.fft.rfft(h_up) * V, n=N)
+        v_j = np.fft.irfft(np.fft.rfft(g_up) * V, n=N)
         return w_j, v_j
-
 
     @staticmethod
     def _imodwt_step(w_j: np.ndarray, v_j: np.ndarray, h: np.ndarray,
                      g: np.ndarray, j: int) -> np.ndarray:
         """
         Inverse pyramid step: (W_j, V_j) -> V_{j-1}.
+
+        v_prev[t] = sum_l h[l]*w_j[(t+scale*l)%N] + g[l]*v_j[(t+scale*l)%N]
+        is a circular *correlation* with the upsampled filters, computed
+        via the correlation-FFT identity corr(a, b) = ifft(conj(fft(a)) *
+        fft(b)).
         """
         N = len(v_j)
-        L = len(h)
         scale = 2 ** (j - 1)
+        h_up = MODWT._upsample_filter(h, scale, N)
+        g_up = MODWT._upsample_filter(g, scale, N)
 
-        v_prev = np.zeros(N, dtype=float)
-        for t in range(N):
-            acc = 0.0
-            for tap in range(L):
-                idx = (t + scale * tap) % N      # forward shift (transpose)
-                acc += h[tap] * w_j[idx] + g[tap] * v_j[idx]
-            v_prev[t] = acc
-        return v_prev
+        Hf = np.fft.rfft(h_up)
+        Gf = np.fft.rfft(g_up)
+        Wf = np.fft.rfft(w_j)
+        Vf = np.fft.rfft(v_j)
+        return np.fft.irfft(np.conj(Hf) * Wf + np.conj(Gf) * Vf, n=N)

@@ -49,8 +49,8 @@ class LMD:
     endpoints           : treat signal endpoints as pseudo-extrema. Default True.
     max_smooth_iter     : max moving-average passes. Default 15.
     max_envelope_iter   : max sifting iterations per PF. Default 200.
-    envelope_epsilon    : stop when mean(|1-a|) < this. Default 0.01.
-    convergence_epsilon : stop when mean(|s-t|) < this. Default 0.01.
+    envelope_epsilon    : stop when mean(abs(1 - a)) < this. Default 0.01.
+    convergence_epsilon : stop when mean(abs(s - t)) < this. Default 0.01.
     min_extrema         : stop extracting if residue has fewer extrema. Default 5.
     """
 

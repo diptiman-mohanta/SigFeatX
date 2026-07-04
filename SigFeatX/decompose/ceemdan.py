@@ -25,13 +25,53 @@ Implementation
 We use the existing EMD class for E_1 extraction. CEEMDAN is much heavier
 than vanilla EMD (typical factor ~50 for I=50, max_imf=10), so the default
 trial count is conservative. Bump it for production analyses.
+
+Each trial's EMD call is independent of every other trial (both within a
+stage and, since EMD is a pure function of its input signal, across the
+whole ensemble), so the trial loop is embarrassingly parallel. Pass
+``n_jobs`` to use multiple processes -- follows the same convention as
+``FeatureAggregator.extract_batch`` (1 = sequential/default, -1 = all
+cores, N = N cores), and is bit-for-bit identical to the sequential
+result for the same ``rng`` seed, since ``Executor.map`` preserves input
+order and EMD itself has no internal randomness.
 """
 
+import os
+import warnings
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 
 import numpy as np
 
-from .._validation import validate_signal_1d
+from .._validation import validate_n_jobs, validate_signal_1d
 from .emd import EMD
+
+# ---------------------------------------------------------------------------
+# Module-level workers (must be top-level to be picklable by ProcessPoolExecutor)
+# ---------------------------------------------------------------------------
+
+def _worker_first_imf(signal: np.ndarray, emd: EMD) -> np.ndarray:
+    """Run EMD and return only the first IMF, zero-padded/truncated if needed."""
+    try:
+        imfs = emd.decompose(signal)
+    except Exception:
+        return np.zeros_like(signal)
+    if len(imfs) == 0:
+        return np.zeros_like(signal)
+    first = np.asarray(imfs[0], dtype=float)
+    if len(first) != len(signal):
+        out = np.zeros_like(signal)
+        n = min(len(first), len(signal))
+        out[:n] = first[:n]
+        return out
+    return first
+
+
+def _worker_full_decompose(signal: np.ndarray, emd: EMD) -> list:
+    """Run full EMD and return all IMFs (empty list on failure)."""
+    try:
+        return emd.decompose(signal)
+    except Exception:
+        return []
 
 
 class CEEMDAN:
@@ -51,6 +91,11 @@ class CEEMDAN:
         criteria). Default 10.
     rng : np.random.Generator or int or None
         Random source for noise. Pass an int for reproducibility.
+    n_jobs : int
+        1 (default) runs trials sequentially. -1 uses all available CPU
+        cores; N uses N worker processes. Falls back to threads if
+        process-based parallelism is unavailable (e.g. sandboxed CI).
+        Output is identical regardless of n_jobs for the same rng seed.
 
     Notes
     -----
@@ -64,6 +109,7 @@ class CEEMDAN:
         noise_amp: float = 0.02,
         max_imf: int = 10,
         rng=None,
+        n_jobs: int = 1,
     ):
         if trials < 2:
             raise ValueError(f"trials must be >= 2; got {trials}.")
@@ -76,6 +122,7 @@ class CEEMDAN:
         self.noise_amp = noise_amp
         self.max_imf = max_imf
         self.rng = np.random.default_rng(rng) if not isinstance(rng, np.random.Generator) else rng
+        self.n_jobs = validate_n_jobs(n_jobs)
         self._emd = EMD(max_imf=-1)               # used for E_1 extraction
 
     # ------------------------------------------------------------------
@@ -91,6 +138,33 @@ class CEEMDAN:
         list of 1D arrays, each the same length as ``sig``.
         """
         sig = validate_signal_1d(sig, name='sig')
+
+        if self.n_jobs == 1:
+            return self._decompose_with_executor(sig, None)
+
+        max_workers = (os.cpu_count() or 1) if self.n_jobs == -1 else self.n_jobs
+        try:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                return self._decompose_with_executor(sig, executor)
+        except (OSError, PermissionError):
+            warnings.warn(
+                "[SigFeatX] Process-based parallelism is unavailable in this "
+                "environment; falling back to threads for CEEMDAN.",
+                RuntimeWarning, stacklevel=2,
+            )
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                return self._decompose_with_executor(sig, executor)
+
+    def reconstruct(self, imfs: list[np.ndarray]) -> np.ndarray:
+        return np.sum(imfs, axis=0)
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _decompose_with_executor(
+        self, sig: np.ndarray, executor: Executor | None
+    ) -> list[np.ndarray]:
         N = len(sig)
         sig_std = float(np.std(sig)) + 1e-12
 
@@ -103,10 +177,11 @@ class CEEMDAN:
         white = self.rng.standard_normal((self.trials, N))
 
         # --- Stage 1: first IMF ------------------------------------------
-        imf1_components = []
-        for i in range(self.trials):
-            imfs_i = self._emd_first_imf(sig + self.noise_amp * sig_std * white[i])
-            imf1_components.append(imfs_i)
+        imf1_components = self._map_trials(
+            executor, _worker_first_imf,
+            [(sig + self.noise_amp * sig_std * white[i], self._emd)
+             for i in range(self.trials)],
+        )
         imf1 = np.mean(imf1_components, axis=0)
 
         imfs: list[np.ndarray] = [imf1]
@@ -123,7 +198,7 @@ class CEEMDAN:
                 break
 
             # For stage k+1 we need E_k(w_i), the k-th IMF of each noise
-            ek_noises = self._kth_imf_of_noises(white, k)
+            ek_noises = self._kth_imf_of_noises(white, k, executor)
             if ek_noises is None:
                 break
 
@@ -132,11 +207,11 @@ class CEEMDAN:
             beta_k = self.noise_amp * (float(np.std(residue)) + 1e-12)
 
             # Compute new ensemble of first-IMFs on residue + scaled noise
-            next_imf_components = []
-            for i in range(self.trials):
-                next_imf_components.append(
-                    self._emd_first_imf(residue + beta_k * ek_noises[i])
-                )
+            next_imf_components = self._map_trials(
+                executor, _worker_first_imf,
+                [(residue + beta_k * ek_noises[i], self._emd)
+                 for i in range(self.trials)],
+            )
             next_imf = np.mean(next_imf_components, axis=0)
 
             imfs.append(next_imf)
@@ -147,46 +222,38 @@ class CEEMDAN:
         imfs.append(residue.copy())
         return imfs
 
-    def reconstruct(self, imfs: list[np.ndarray]) -> np.ndarray:
-        return np.sum(imfs, axis=0)
+    @staticmethod
+    def _map_trials(executor: Executor | None, fn, args_list: list[tuple]) -> list:
+        """Apply fn(*args) over args_list, sequentially or via executor.
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+        ``Executor.map`` preserves input order, so results (and therefore
+        the ensemble average) are identical regardless of executor choice.
+        """
+        if not args_list:
+            return []
+        if executor is None:
+            return [fn(*args) for args in args_list]
+        return list(executor.map(fn, *zip(*args_list, strict=True)))
 
-    def _emd_first_imf(self, signal: np.ndarray) -> np.ndarray:
-        """Run EMD and return only the first IMF, zero-padded if needed."""
-        try:
-            imfs = self._emd.decompose(signal)
-        except Exception:
-            return np.zeros_like(signal)
-        if len(imfs) == 0:
-            return np.zeros_like(signal)
-        first = np.asarray(imfs[0], dtype=float)
-        if len(first) != len(signal):
-            # Defensive: align lengths just in case
-            out = np.zeros_like(signal)
-            n = min(len(first), len(signal))
-            out[:n] = first[:n]
-            return out
-        return first
-
-    def _kth_imf_of_noises(self, noises: np.ndarray, k: int) -> np.ndarray | None:
+    def _kth_imf_of_noises(
+        self, noises: np.ndarray, k: int, executor: Executor | None
+    ) -> np.ndarray | None:
         """
         Return E_k(w_i) for every noise realisation.
 
         Returns None if more than half the noises fail to produce k IMFs.
         """
+        full_decomps = self._map_trials(
+            executor, _worker_full_decompose,
+            [(noises[i], self._emd) for i in range(noises.shape[0])],
+        )
+
         out = []
         n_failed = 0
-        for i in range(noises.shape[0]):
-            try:
-                imfs = self._emd.decompose(noises[i])
-            except Exception:
-                imfs = []
+        for imfs in full_decomps:
             if len(imfs) <= k:
                 n_failed += 1
-                out.append(np.zeros_like(noises[i]))
+                out.append(np.zeros(noises.shape[1]))
             else:
                 out.append(np.asarray(imfs[k], dtype=float))
 

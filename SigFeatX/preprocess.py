@@ -122,12 +122,12 @@ class SignalPreprocessor:
 
         Examples
         --------
-        # Keep only 8-30 Hz (beta/alpha EEG)
-        filtered = preprocessor.bandpass(sig, low_hz=8, high_hz=30, fs=250)
+        >>> # Keep only 8-30 Hz (beta/alpha EEG)
+        >>> filtered = preprocessor.bandpass(sig, low_hz=8, high_hz=30, fs=250)  # doctest: +SKIP
 
-        # As a denoise method
-        filtered = preprocessor.denoise(sig, method='bandpass',
-                                        low_hz=8, high_hz=30, fs=250)
+        >>> # As a denoise method
+        >>> filtered = preprocessor.denoise(sig, method='bandpass',
+        ...                                 low_hz=8, high_hz=30, fs=250)  # doctest: +SKIP
         """
         sig = validate_signal_1d(sig, name='sig')
         fs = validate_sampling_rate(fs)
@@ -255,10 +255,13 @@ class SignalPreprocessor:
 
         Fits a smooth baseline to the lower envelope of the signal by
         iteratively reweighting a penalised least squares problem:
+
           - Points above the current baseline get weight p  (small)
           - Points below the current baseline get weight 1-p (large)
+
         This asymmetry means the baseline is attracted to the signal
         floor rather than its mean, making it suitable for:
+
           - EEG baseline wander
           - Spectroscopic baselines
           - Vibration signals with slowly varying DC offset

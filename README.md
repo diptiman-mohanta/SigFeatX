@@ -560,6 +560,22 @@ with Pool(processes=4) as pool:
 - **Decomposition Methods**: EMD and VMD are computationally expensive; use DWT for faster processing
 - **Feature Count**: Extracting all features with all decomposition methods can yield 200+ features
 - **Memory**: VMD and SVMD require more memory for long signals
+- **MODWT**: uses an FFT-based pyramid algorithm (not a direct loop), so it
+  scales well even at long signal lengths and many decomposition levels.
+- **CEEMDAN**: pass `n_jobs=-1` to parallelize the (embarrassingly
+  parallel) trial ensemble across CPU cores; output is identical to
+  `n_jobs=1` for the same `rng` seed.
+
+## Documentation
+
+The `docs/` directory has a Sphinx setup (quickstart + full API reference).
+Build it locally with:
+
+```bash
+pip install -e ".[docs]"
+sphinx-build -b html docs docs/_build/html
+# open docs/_build/html/index.html
+```
 
 ## Benchmarking
 
