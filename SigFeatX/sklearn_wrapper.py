@@ -38,8 +38,17 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
-    BaseEstimator = object
-    TransformerMixin = object
+
+    # Distinct placeholder classes -- aliasing both to `object` makes
+    # `class SigFeatXTransformer(BaseEstimator, TransformerMixin)` below
+    # equivalent to `class Foo(object, object)`, which raises
+    # `TypeError: duplicate base class object` and crashes the import of
+    # the whole SigFeatX package for anyone without scikit-learn installed.
+    class BaseEstimator:  # type: ignore[no-redef]
+        pass
+
+    class TransformerMixin:  # type: ignore[no-redef]
+        pass
 
 from .aggregator import FeatureAggregator
 

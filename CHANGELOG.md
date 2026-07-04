@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`import SigFeatX` crashed entirely without scikit-learn installed.**
+  The optional-sklearn fallback in `sklearn_wrapper.py` aliased both
+  `BaseEstimator` and `TransformerMixin` to `object`, so
+  `class SigFeatXTransformer(BaseEstimator, TransformerMixin)` became
+  `class Foo(object, object)` -- a `TypeError: duplicate base class
+  object` that isn't an `ImportError`, so it wasn't caught and instead
+  broke importing the whole package. Only ever masked because every dev
+  environment happened to have scikit-learn installed; caught when the
+  new docs CI job (below) installed a minimal environment without it.
+  Now uses distinct placeholder classes, and `SigFeatX.__init__`'s
+  sklearn-available flag checks `sklearn_wrapper.SKLEARN_AVAILABLE`
+  directly instead of the no-longer-reliable "did this import raise"
+  signal, so `SigFeatXTransformer` is correctly omitted from `__all__`
+  when scikit-learn genuinely isn't installed.
+
 ### Added
 - **Performance**: `MODWT` decompose/reconstruct now use FFT-based circular
   convolution instead of an O(N x taps) direct double loop -- validated
