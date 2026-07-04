@@ -577,6 +577,14 @@ sphinx-build -b html docs docs/_build/html
 # open docs/_build/html/index.html
 ```
 
+For a live, runnable tour instead, see
+[`examples/playground.ipynb`](examples/playground.ipynb): one synthetic
+signal, decomposed and perfectly reconstructed by every decomposition
+method in the library side by side (with the reconstruction error printed,
+not just claimed), every feature family run on it, and a mini experiment
+checking that well-known features (Hurst exponent, DFA) land where
+signal-processing theory says they should.
+
 ## Benchmarking
 
 Run the local benchmark script to compare common extraction workflows on your

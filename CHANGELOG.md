@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`examples/playground.ipynb`**: a runnable, executed-with-outputs demo
+  notebook. Generates one synthetic multi-band signal, decomposes and
+  reconstructs it with every decomposition method (EMD, CEEMDAN, VMD,
+  SVMD, EFD, LMD, JMD, DWT, MODWT), printing and plotting the actual
+  reconstruction error for each rather than asserting correctness; runs
+  every feature family on it; and a mini experiment verifying well-known
+  features (Hurst exponent, DFA-alpha) land near their textbook values
+  (~0.5) on white noise. Nothing in it is cherry-picked -- the notebook
+  is committed with its real, freshly executed outputs.
+
 ### Fixed
 - **Docs CI failed on a fresh checkout**: `docs/conf.py` pointed
   `html_static_path`/`templates_path` at `docs/_static`/`docs/_templates`,
