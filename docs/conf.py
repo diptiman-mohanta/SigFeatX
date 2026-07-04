@@ -25,7 +25,6 @@ extensions = [
     "myst_parser",
 ]
 
-templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 source_suffix = {
@@ -58,6 +57,9 @@ intersphinx_mapping = {
 }
 
 # -- HTML output --------------------------------------------------------------
+# No custom static assets or templates yet -- html_static_path /
+# templates_path are omitted rather than pointed at empty directories,
+# since git doesn't track empty dirs and a fresh checkout (e.g. CI) would
+# then be missing them, failing the -W (warnings-as-errors) docs build.
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
 html_title = f"SigFeatX {release}"

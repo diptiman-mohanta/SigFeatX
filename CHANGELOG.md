@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Docs CI failed on a fresh checkout**: `docs/conf.py` pointed
+  `html_static_path`/`templates_path` at `docs/_static`/`docs/_templates`,
+  which were empty locally and so were never committed (git doesn't
+  track empty directories) -- a fresh clone (CI, or anyone else cloning
+  the repo) was missing them, and `-W` turned the resulting
+  "html_static_path entry '_static' does not exist" warning into a
+  build failure. Verified by reproducing the exact failure in a clean
+  `git worktree` (matching a fresh CI checkout) before and after the
+  fix. Removed both settings rather than committing empty placeholder
+  directories, since there's no custom static/template content yet.
 - **`import SigFeatX` crashed entirely without scikit-learn installed.**
   The optional-sklearn fallback in `sklearn_wrapper.py` aliased both
   `BaseEstimator` and `TransformerMixin` to `object`, so
