@@ -1,5 +1,12 @@
 # SigFeatX
+
+[![PyPI version](https://img.shields.io/pypi/v/SigFeatX.svg)](https://pypi.org/project/SigFeatX/)
+[![Python versions](https://img.shields.io/pypi/pyversions/SigFeatX.svg)](https://pypi.org/project/SigFeatX/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/diptiman-mohanta/SigFeatX/blob/main/LICENSE)
+[![CI](https://github.com/diptiman-mohanta/SigFeatX/actions/workflows/ci.yml/badge.svg)](https://github.com/diptiman-mohanta/SigFeatX/actions/workflows/ci.yml)
+
 A comprehensive Python library for extracting statistical features from 1D signals using advanced decomposition techniques and signal processing metrics.
+
 ## Features
 
 ### Signal Preprocessing
