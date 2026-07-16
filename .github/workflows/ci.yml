@@ -31,6 +31,14 @@ jobs:
       - name: Install package with dev and optional extras
         run: python -m pip install -e ".[dev,all]"
 
+      # Reference implementation for tests/test_crossval_pyemd.py. Not a
+      # dev extra: its PyEMD/ package dir collides with the unrelated
+      # `pyemd` package on case-insensitive filesystems (Windows/macOS
+      # default), so it is only installed on the Linux runners here.
+      - name: Install reference PyEMD for cross-validation (Linux only)
+        if: runner.os == 'Linux'
+        run: python -m pip install EMD-signal
+
       - name: Run tests
         run: pytest --cov=SigFeatX --cov-report=xml
 

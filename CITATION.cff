@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use SigFeatX in your research, please cite it as below."
+title: "SigFeatX: Comprehensive signal feature extraction with decomposition, batch processing, and sklearn integration"
+type: software
+authors:
+  - family-names: "Mohanta"
+    given-names: "Diptiman"
+    email: "diptimanmohanta7@gmail.com"
+repository-code: "https://github.com/diptiman-mohanta/SigFeatX"
+url: "https://github.com/diptiman-mohanta/SigFeatX"
+license: MIT
+version: 0.4.0
+date-released: 2026-07-16
+keywords:
+  - signal processing
+  - feature extraction
+  - decomposition
+  - time series
+  - EMD
+  - CEEMDAN
+  - VMD
+  - MODWT
+  - wavelet
+  - Hilbert-Huang
+  - recurrence quantification
+  - multifractal
+  - entropy
+  - EEG
+  - ECG
+  - biomedical

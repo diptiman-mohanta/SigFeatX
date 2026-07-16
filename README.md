@@ -63,12 +63,22 @@ A comprehensive Python library for extracting statistical features from 1D signa
 ## Installation
 
 ```bash
-# Clone the repository
+pip install SigFeatX
+```
+
+Optional extras pull in heavier, feature-specific dependencies:
+
+```bash
+pip install "SigFeatX[sklearn]"   # scikit-learn transformer
+pip install "SigFeatX[all]"       # sklearn + tqdm + parquet + hdf5 + viz
+```
+
+Or install from source for development:
+
+```bash
 git clone https://github.com/diptiman-mohanta/SigFeatX.git
 cd SigFeatX
-
-# Install the package (core dependencies come from pyproject.toml)
-pip install -e .
+pip install -e ".[dev,all]"
 ```
 
 ### Requirements

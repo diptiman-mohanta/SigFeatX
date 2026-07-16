@@ -14,6 +14,7 @@ processing, an sklearn-compatible transformer, and a fluent pipeline builder.
 :caption: Contents
 
 quickstart
+glossary
 api
 ```
 

@@ -3,7 +3,7 @@ SigFeatX - Signal Feature Extraction Library
 A comprehensive library for extracting statistical features from 1D signals.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Diptiman Mohanta"
 
 from .aggregator import BatchResult, FeatureAggregator
