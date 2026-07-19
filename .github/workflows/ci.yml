@@ -39,6 +39,11 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m pip install EMD-signal
 
+      # Reference implementation for tests/test_crossval_entropy.py.
+      - name: Install reference antropy for cross-validation (Linux only)
+        if: runner.os == 'Linux'
+        run: python -m pip install antropy
+
       - name: Run tests
         run: pytest --cov=SigFeatX --cov-report=xml
 

@@ -1,7 +1,9 @@
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy import stats
 from scipy.fft import fft, fftfreq
+from scipy.spatial import cKDTree
 
 from SigFeatX._validation import validate_sampling_rate, validate_signal_1d
 from SigFeatX.utils import SignalUtils
@@ -308,7 +310,10 @@ class EntropyFeatures:
     def _sample_entropy(sig: np.ndarray, m: int = 2, r: float | None = None) -> float:
         """
         Sample Entropy (Richman & Moorman 2000).
-        Vectorised implementation — self-matches excluded (i≠j) per the paper.
+        Self-matches excluded (i≠j) per the paper.
+
+        Neighbour counting uses a k-d tree with Chebyshev metric
+        (O(N log N)-ish) instead of the O(N²) pairwise distance matrix.
         """
         if r is None:
             r = float(0.2 * np.std(sig))
@@ -317,22 +322,15 @@ class EntropyFeatures:
             return 0.0
 
         def _count_matches(template_len: int) -> int:
-            idx      = np.arange(N - template_len)
-            patterns = np.array([sig[i : i + template_len] for i in idx])
-            M     = len(patterns)
-            count = 0
-            block = 500
-            for start in range(0, M, block):
-                end   = min(start + block, M)
-                chunk = patterns[start:end]
-                diff  = np.abs(chunk[:, None, :] - patterns[None, :, :])
-                chebyshev = np.max(diff, axis=2)
-                matches   = chebyshev <= r
-                for local_i in range(end - start):
-                    global_i = start + local_i
-                    matches[local_i, global_i] = False
-                count += int(np.sum(matches))
-            return count
+            # N - template_len vectors for both lengths (Richman & Moorman)
+            M = N - template_len
+            patterns = np.ascontiguousarray(
+                sliding_window_view(sig, template_len)[:M]
+            )
+            tree = cKDTree(patterns)
+            # ordered pairs within r (Chebyshev), minus the M self-pairs
+            pairs = int(tree.count_neighbors(tree, r, p=np.inf))
+            return pairs - M
 
         B = _count_matches(m)
         A = _count_matches(m + 1)
@@ -345,26 +343,31 @@ class EntropyFeatures:
 
     @staticmethod
     def _permutation_entropy(sig: np.ndarray, order: int = 3, delay: int = 1) -> float:
-        """Permutation Entropy (Bandt & Pompe 2002) — correct."""
+        """Permutation Entropy (Bandt & Pompe 2002) — vectorised."""
         n = len(sig)
-        if n < delay * (order - 1) + 1:
+        span = delay * (order - 1) + 1
+        if n < span:
             return 0.0
-        permutations: dict[tuple[int, ...], int] = {}
-        for i in range(n - delay * (order - 1)):
-            pattern = sig[i : i + delay * order : delay]
-            key     = tuple(np.argsort(pattern))
-            permutations[key] = permutations.get(key, 0) + 1
-        total = sum(permutations.values())
+        # all embedding windows at once: (n - span + 1, order)
+        windows = sliding_window_view(sig, span)[:, ::delay]
+        ranks = np.argsort(windows, axis=1, kind='quicksort')
+        # encode each ordinal pattern as a single integer (order is small)
+        codes = ranks @ (order ** np.arange(order, dtype=np.int64))
+        _, counts = np.unique(codes, return_counts=True)
+        total = counts.sum()
         if total == 0:
             return 0.0
-        probs = np.array([c / total for c in permutations.values()])
+        probs = counts / total
         return float(max(0.0, -np.sum(probs * np.log2(probs + 1e-10))))
 
     @staticmethod
     def _approximate_entropy(sig: np.ndarray, m: int = 2, r: float | None = None) -> float:
         """
-        Approximate Entropy (Pincus 1991) — vectorised block-wise.
+        Approximate Entropy (Pincus 1991).
         Self-matches (i==j) included per the original ApEn definition.
+
+        Per-template neighbour counts come from a k-d tree with Chebyshev
+        metric instead of the O(N²) pairwise distance matrix.
         """
         if r is None:
             r = float(0.2 * np.std(sig))
@@ -373,17 +376,14 @@ class EntropyFeatures:
             return 0.0
 
         def _phi(template_len: int) -> float:
-            M        = N - template_len + 1
-            patterns = np.array([sig[i : i + template_len] for i in range(M)])
-            log_C    = np.empty(M)
-            block    = 500
-            for start in range(0, M, block):
-                end       = min(start + block, M)
-                chunk     = patterns[start:end]
-                diff      = np.abs(chunk[:, None, :] - patterns[None, :, :])
-                chebyshev = np.max(diff, axis=2)
-                counts    = np.sum(chebyshev <= r, axis=1)
-                log_C[start:end] = np.log(counts / M + 1e-10)
+            M = N - template_len + 1
+            patterns = np.ascontiguousarray(sliding_window_view(sig, template_len))
+            tree = cKDTree(patterns)
+            # neighbour count per template, self-match included
+            counts = tree.query_ball_point(
+                patterns, r, p=np.inf, return_length=True
+            )
+            log_C = np.log(counts / M + 1e-10)
             return float(np.sum(log_C) / M)
 
         return _phi(m) - _phi(m + 1)

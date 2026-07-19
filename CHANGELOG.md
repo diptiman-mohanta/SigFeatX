@@ -4,6 +4,33 @@ All notable changes to SigFeatX are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Large entropy-feature speedups**, proven numerically equivalent to the
+  previous implementations across a 2,901-case corpus (bit-identical for
+  SampEn/ApEn/Bubble/LZ76; ≤1e-13 float-summation differences for
+  Fuzzy/Permutation):
+  - Sample Entropy: k-d tree (Chebyshev) neighbour counting — **~139×**
+    faster at N=10,000 (13.96 s → 0.10 s).
+  - Approximate Entropy: k-d tree per-template counts — **~48×** faster
+    at N=10,000.
+  - Lempel–Ziv complexity: C-speed substring search in the
+    Kaspar–Schuster parse — **~21×** faster at N=50,000 (24.3 s → 1.1 s).
+  - Bubble Entropy: vectorised inversion counting replaces the per-window
+    Python bubble sort — **~52×** faster at N=10,000.
+  - Permutation Entropy: vectorised ordinal-pattern encoding — **~40×**
+    faster at N=50,000.
+  - Fuzzy Entropy: cache-blocked in-place distance computation — ~4×
+    faster at N≤2,000.
+
+### Added
+- **Entropy/nonlinear cross-validation tests** (`tests/test_crossval_entropy.py`):
+  closed-form theory checks (logistic-map Lyapunov = ln 2, white-noise
+  DFA/Hurst ≈ 0.5, maximal permutation/dispersion entropy of i.i.d. noise)
+  plus agreement with the `antropy` reference library (skipped if not
+  installed; installed on Linux CI).
+
 ## [0.4.0] — 2026-07-16
 
 First release published to PyPI (`pip install SigFeatX`). Also the first

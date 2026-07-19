@@ -13,6 +13,7 @@ Includes:
 
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.stats import norm
 
 from .._validation import validate_signal_1d
@@ -125,16 +126,32 @@ class AdvancedEntropyFeatures:
 
         def _phi(length: int) -> float:
             count = N - length + 1
-            patterns = np.array([sig[i : i + length] for i in range(count)])
             # Centre each pattern by its mean (Chen's definition)
+            patterns = sliding_window_view(sig, length)
             patterns = patterns - patterns.mean(axis=1, keepdims=True)
-            # Chebyshev distances
+            # Block-wise Chebyshev distances + fuzzy membership exp(-(d/r)^n).
+            # (KD-trees don't apply here: the smooth membership needs the
+            # actual distance values, not just a neighbour count.)
             mu = 0.0
-            for i in range(count):
-                diff = np.abs(patterns - patterns[i])
-                d = np.max(diff, axis=1)
-                # Fuzzy membership: exp(-(d/r)^n)
-                mu += np.sum(np.exp(-((d / r) ** n)))
+            # small blocks keep the distance matrix in cache; in-place ops
+            # avoid materialising full-size temporaries for each step
+            block = max(1, min(32, count))
+            for start in range(0, count, block):
+                chunk = patterns[start : start + block]
+                # running maximum over the (small) embedding dimension keeps
+                # the working set 2-D instead of materialising a 3-D array
+                d = np.abs(chunk[:, 0, None] - patterns[None, :, 0])
+                for j in range(1, length):
+                    np.maximum(
+                        d,
+                        np.abs(chunk[:, j, None] - patterns[None, :, j]),
+                        out=d,
+                    )
+                d /= r
+                d **= n
+                np.negative(d, out=d)
+                np.exp(d, out=d)
+                mu += float(d.sum())
             # Subtract self-matches (count) and average
             return float((mu - count) / (count * (count - 1)))
 
@@ -176,32 +193,19 @@ class AdvancedEntropyFeatures:
         threshold = np.median(sig) if binarize == 'median' else np.mean(sig)
         s = ''.join('1' if v > threshold else '0' for v in sig)
 
-        # Standard LZ76 parsing
+        # Standard LZ76 (Kaspar-Schuster) parsing, using C-speed substring
+        # search: the phrase s[i:i+k] stays reproducible while it occurs
+        # starting at some position < i (the occurrence may overlap the
+        # phrase itself, ending anywhere up to i+k-2). An unfinished final
+        # phrase still counts, per the original algorithm.
+        c = 0
         i = 0
-        c = 1
-        pos = 1
-        k = 1
-        k_max = 1
-        while True:
-            if s[i + k - 1] != s[pos + k - 1]:
-                if k > k_max:
-                    k_max = k
-                i += 1
-                if i == pos:
-                    c += 1
-                    pos += k_max
-                    if pos + 1 > N:
-                        break
-                    i = 0
-                    k = 1
-                    k_max = 1
-                else:
-                    k = 1
-            else:
+        while i < N:
+            k = 1
+            while i + k <= N and s.find(s[i : i + k], 0, i + k - 1) != -1:
                 k += 1
-                if pos + k > N:
-                    c += 1
-                    break
+            c += 1
+            i += k
 
         if normalize:
             b = N / np.log2(N + 1e-12)
@@ -237,20 +241,11 @@ class AdvancedEntropyFeatures:
             return 0.0
 
         def _swap_dist(length: int) -> np.ndarray:
-            count = N - length + 1
-            swaps = np.zeros(count, dtype=int)
-            for i in range(count):
-                v = sig[i : i + length].copy()
-                # Bubble sort swap counter
-                n = len(v)
-                s = 0
-                for j in range(n - 1):
-                    for k in range(n - 1 - j):
-                        if v[k] > v[k + 1]:
-                            v[k], v[k + 1] = v[k + 1], v[k]
-                            s += 1
-                swaps[i] = s
-            return swaps
+            # Bubble-sort swap count == number of inversions: pairs (j, k)
+            # with j < k and v[j] > v[k]. Count them for all windows at once.
+            windows = sliding_window_view(sig, length)
+            ju, ku = np.triu_indices(length, k=1)
+            return np.sum(windows[:, ju] > windows[:, ku], axis=1)
 
         s_m = _swap_dist(m)
         s_m1 = _swap_dist(m + 1)
