@@ -4,6 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/SigFeatX.svg)](https://pypi.org/project/SigFeatX/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/diptiman-mohanta/SigFeatX/blob/main/LICENSE)
 [![CI](https://github.com/diptiman-mohanta/SigFeatX/actions/workflows/ci.yml/badge.svg)](https://github.com/diptiman-mohanta/SigFeatX/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21442641.svg)](https://doi.org/10.5281/zenodo.21442641)
 
 A comprehensive Python library for extracting statistical features from 1D signals using advanced decomposition techniques and signal processing metrics.
 
@@ -647,14 +648,24 @@ for window in windows:
 
 ## Citation
 
-If you use SigFeatX in your research, please cite:
+If you use SigFeatX in your research, please cite it via its DOI. GitHub's
+"Cite this repository" button (powered by [`CITATION.cff`](CITATION.cff))
+generates this for you automatically.
+
+The DOI below is the *concept* DOI — it always resolves to the latest
+release. To cite the exact version you used, take the version-specific DOI
+from that release's [Zenodo record](https://doi.org/10.5281/zenodo.21442641)
+(for example, v0.4.0 is `10.5281/zenodo.21442642`).
 
 ```bibtex
-@software{sigfeatx2024,
-  title={SigFeatX: Signal Feature Extraction Library},
-  author={Diptiman Mohanta},
-  year={2024},
-  url={https://github.com/diptiman-mohanta/SigFeatX}
+@software{mohanta_sigfeatx,
+  author    = {Mohanta, Diptiman},
+  title     = {{SigFeatX: Comprehensive signal feature extraction with
+               decomposition, batch processing, and sklearn integration}},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21442641},
+  url       = {https://doi.org/10.5281/zenodo.21442641}
 }
 ```
 
